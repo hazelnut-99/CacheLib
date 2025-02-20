@@ -122,6 +122,12 @@ struct Stats {
   uint64_t numNvmRejectsByExpiry{0};
   uint64_t numNvmRejectsByClean{0};
 
+  uint64_t rebalancerNumRuns{0};
+  uint64_t rebalancerNumRebalancedSlabs{0};
+  uint64_t rebalancerAvgRebalanceTimeMs{0};
+  uint64_t rebalancerAvgReleaseTimeMs{0};
+  uint64_t rebalancerAvgPickTimeMs{0};
+
   uint64_t inconsistencyCount{0};
   bool isNvmCacheDisabled{false};
   uint64_t invalidDestructorCount{0};
@@ -155,6 +161,14 @@ struct Stats {
                           pctFn(numEvictions, evictAttempts))
         << std::endl;
     out << folly::sformat("RAM Evictions : {:,}", numEvictions) << std::endl;
+    
+    // this isn't displaying, todo: figure out why
+    out << folly::sformat("Rebalance Num Runs  : {:,}", rebalancerNumRuns) << std::endl;
+    out << folly::sformat("Rebalance Num Rebalanced Slabs  : {:,}", rebalancerNumRebalancedSlabs) << std::endl;
+    out << folly::sformat("Rebalance Avg Rebalance TimeMs  : {:,}", rebalancerAvgRebalanceTimeMs) << std::endl;
+    out << folly::sformat("Rebalance Avg Release TimeMs  : {:,}", rebalancerAvgReleaseTimeMs) << std::endl;
+    out << folly::sformat("Rebalance Avg Pick TimeMs  : {:,}", rebalancerAvgPickTimeMs) << std::endl;
+
 
     auto foreachAC = [](const auto& map, auto cb) {
       for (auto& pidStat : map) {

@@ -17,7 +17,9 @@
 #include "cachelib/cachebench/util/CacheConfig.h"
 
 #include "cachelib/allocator/HitsPerSlabStrategy.h"
+#include "cachelib/allocator/MarginalHitsStrategy.h"
 #include "cachelib/allocator/LruTailAgeStrategy.h"
+#include "cachelib/allocator/FreeMemStrategy.h"
 #include "cachelib/allocator/RandomStrategy.h"
 
 namespace facebook {
@@ -28,10 +30,26 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, cacheDir);
   JSONSetVal(configJson, cacheSizeMB);
   JSONSetVal(configJson, poolRebalanceIntervalSec);
+  JSONSetVal(configJson, poolRebalancerFreeAllocThreshold);
   JSONSetVal(configJson, moveOnSlabRelease);
   JSONSetVal(configJson, rebalanceStrategy);
   JSONSetVal(configJson, rebalanceMinSlabs);
   JSONSetVal(configJson, rebalanceDiffRatio);
+
+  JSONSetVal(configJson, ltaMinTailAgeDifference);
+  JSONSetVal(configJson, ltaNumSlabsFreeMem);
+  JSONSetVal(configJson, ltaSlabProjectionLength);
+
+  JSONSetVal(configJson, hpsMinDiff);
+  JSONSetVal(configJson, hpsNumSlabsFreeMem);
+  JSONSetVal(configJson, hpsMinLruTailAge);
+  JSONSetVal(configJson, hpsMaxLruTailAge);
+
+  JSONSetVal(configJson, fmNumFreeSlabs);
+  JSONSetVal(configJson, fmMaxUnAllocatedSlabs);
+
+  JSONSetVal(configJson, mhMovingAverageParam);
+  JSONSetVal(configJson, mhMaxFreeMemSlabs);
 
   JSONSetVal(configJson, htBucketPower);
   JSONSetVal(configJson, htLockPower);
@@ -109,10 +127,13 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, nvmAdmissionRetentionTimeThreshold);
 
   JSONSetVal(configJson, customConfigJson);
+
+  // todo add new parameters for configuring slab rebalance
+
   // if you added new fields to the configuration, update the JSONSetVal
   // to make them available for the json configs and increment the size
   // below
-  checkCorrectSize<CacheConfig, 760>();
+  checkCorrectSize<CacheConfig, 816>();
 
   if (numPools != poolSizes.size()) {
     throw std::invalid_argument(folly::sformat(
@@ -126,15 +147,39 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
   if (poolRebalanceIntervalSec == 0) {
     return nullptr;
   }
-
+  // todo: support free_mem and marginal hits
   if (rebalanceStrategy == "tail-age") {
-    auto config = LruTailAgeStrategy::Config{
-        rebalanceDiffRatio, static_cast<unsigned int>(rebalanceMinSlabs)};
-    return std::make_shared<LruTailAgeStrategy>(config);
+    LruTailAgeStrategy::Config ltaConfig;
+    ltaConfig.tailAgeDifferenceRatio = rebalanceDiffRatio;
+    ltaConfig.minTailAgeDifference = ltaMinTailAgeDifference;
+    ltaConfig.minSlabs = rebalanceMinSlabs;
+    ltaConfig.numSlabsFreeMem = ltaNumSlabsFreeMem;
+    ltaConfig.slabProjectionLength = ltaSlabProjectionLength;
+    return std::make_shared<LruTailAgeStrategy>(ltaConfig);
   } else if (rebalanceStrategy == "hits") {
-    auto config = HitsPerSlabStrategy::Config{
-        rebalanceDiffRatio, static_cast<unsigned int>(rebalanceMinSlabs)};
-    return std::make_shared<HitsPerSlabStrategy>(config);
+    HitsPerSlabStrategy::Config hpsConfig;
+    hpsConfig.minDiff = hpsMinDiff;
+    hpsConfig.diffRatio = rebalanceDiffRatio;
+    hpsConfig.minSlabs = rebalanceMinSlabs;
+    hpsConfig.numSlabsFreeMem = hpsNumSlabsFreeMem;
+    hpsConfig.minLruTailAge = hpsMinLruTailAge;
+    hpsConfig.maxLruTailAge = hpsMaxLruTailAge;
+    return std::make_shared<HitsPerSlabStrategy>(hpsConfig);
+  } else if (rebalanceStrategy == "marginal-hits") {
+    MarginalHitsStrategy::Config mhConfig;
+    mhConfig.minSlabs = rebalanceMinSlabs;
+    mhConfig.movingAverageParam = mhMovingAverageParam;
+    mhConfig.maxFreeMemSlabs = mhMaxFreeMemSlabs;
+    return std::make_shared<MarginalHitsStrategy>(mhConfig);
+  } else if (rebalanceStrategy == "free-mem") {
+    FreeMemStrategy::Config fmConfig;
+    fmConfig.minSlabs = rebalanceMinSlabs;
+    fmConfig.numFreeSlabs = fmNumFreeSlabs;
+    fmConfig.maxUnAllocatedSlabs = fmMaxUnAllocatedSlabs;
+    return std::make_shared<FreeMemStrategy>(fmConfig);
+  } else if (rebalanceStrategy == "default") {
+    // the default strategy, only rebalance when allocation failures happen.
+    return std::make_shared<RebalanceStrategy>();
   } else {
     // use random strategy to just trigger some slab release.
     return std::make_shared<RandomStrategy>(

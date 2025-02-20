@@ -472,7 +472,7 @@ inline typename LruAllocator::MMConfig makeMMConfig(CacheConfig const& config) {
                                 config.useCombinedLockForIterators);
 }
 
-// LRU
+// LRU 2Q
 template <>
 inline typename Lru2QAllocator::MMConfig makeMMConfig(
     CacheConfig const& config) {
@@ -486,6 +486,15 @@ inline typename Lru2QAllocator::MMConfig makeMMConfig(
                                   config.lru2qColdPct,
                                   0,
                                   config.useCombinedLockForIterators);
+}
+
+// TinyLFU
+// todo: add more parameter for lfu (see MMTinyLFU.h)
+template <>
+inline typename TinyLFUAllocator::MMConfig makeMMConfig(
+    CacheConfig const& config) {
+  return TinyLFUAllocator::MMConfig(
+      config.lruRefreshSec, config.lruUpdateOnWrite, config.lruUpdateOnRead);
 }
 
 template <typename Allocator>
@@ -513,9 +522,15 @@ Cache<Allocator>::Cache(const CacheConfig& config,
       itemRecords_(config_.enableItemDestructorCheck) {
   constexpr size_t MB = 1024ULL * 1024ULL;
 
+  if (config_.rebalanceStrategy == "marginal-hits") {
+    allocatorConfig_.enableTailHitsTracking();
+  }
   allocatorConfig_.enablePoolRebalancing(
       config_.getRebalanceStrategy(),
       std::chrono::seconds(config_.poolRebalanceIntervalSec));
+
+  allocatorConfig_.poolRebalancerFreeAllocThreshold =
+      config_.poolRebalancerFreeAllocThreshold;
 
   if (config_.moveOnSlabRelease && movingSync != nullptr) {
     allocatorConfig_.enableMovingOnSlabRelease(
@@ -1136,7 +1151,7 @@ Stats Cache<Allocator>::getStats() const {
   }
 
   const auto cacheStats = cache_->getGlobalCacheStats();
-  const auto rebalanceStats = cache_->getSlabReleaseStats();
+  const auto slabReleaseStats = cache_->getSlabReleaseStats();
   const auto navyStats = cache_->getNvmCacheStatsMap().toMap();
 
   ret.allocationClassStats = allocationClassStats;
@@ -1179,13 +1194,21 @@ Stats Cache<Allocator>::getStats() const {
   ret.numNvmDeletes = cacheStats.numNvmDeletes;
   ret.numNvmSkippedDeletes = cacheStats.numNvmSkippedDeletes;
 
-  ret.slabsReleased = rebalanceStats.numSlabReleaseForRebalance;
+  ret.slabsReleased = slabReleaseStats.numSlabReleaseForRebalance;
   ret.numAbortedSlabReleases = cacheStats.numAbortedSlabReleases;
   ret.numReaperSkippedSlabs = cacheStats.numReaperSkippedSlabs;
-  ret.moveAttemptsForSlabRelease = rebalanceStats.numMoveAttempts;
-  ret.moveSuccessesForSlabRelease = rebalanceStats.numMoveSuccesses;
-  ret.evictionAttemptsForSlabRelease = rebalanceStats.numEvictionAttempts;
-  ret.evictionSuccessesForSlabRelease = rebalanceStats.numEvictionSuccesses;
+  ret.moveAttemptsForSlabRelease = slabReleaseStats.numMoveAttempts;
+  ret.moveSuccessesForSlabRelease = slabReleaseStats.numMoveSuccesses;
+  ret.evictionAttemptsForSlabRelease = slabReleaseStats.numEvictionAttempts;
+  ret.evictionSuccessesForSlabRelease = slabReleaseStats.numEvictionSuccesses;
+
+  ret.rebalancerNumRuns = cacheStats.rebalancerStats.numRuns;
+  ret.rebalancerNumRebalancedSlabs =
+      cacheStats.rebalancerStats.numRebalancedSlabs;
+  ret.rebalancerAvgRebalanceTimeMs =
+      cacheStats.rebalancerStats.avgRebalanceTimeMs;
+  ret.rebalancerAvgReleaseTimeMs = cacheStats.rebalancerStats.avgReleaseTimeMs;
+  ret.rebalancerAvgPickTimeMs = cacheStats.rebalancerStats.avgPickTimeMs;
 
   ret.inconsistencyCount = getInconsistencyCount();
   ret.isNvmCacheDisabled = isNvmCacheDisabled();

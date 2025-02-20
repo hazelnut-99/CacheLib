@@ -39,6 +39,7 @@ class CacheMonitorFactory {
   virtual ~CacheMonitorFactory() = default;
   virtual std::unique_ptr<CacheMonitor> create(LruAllocator& cache) = 0;
   virtual std::unique_ptr<CacheMonitor> create(Lru2QAllocator& cache) = 0;
+  virtual std::unique_ptr<CacheMonitor> create(TinyLFUAllocator& cache) = 0;
 };
 
 // Parse memory tiers configuration from JSON config
@@ -70,10 +71,37 @@ struct CacheConfig : public JSONConfig {
   std::string cacheDir{""};
 
   uint64_t cacheSizeMB{0};
+
+  // slab rebalance related
+  // top-level
   uint64_t poolRebalanceIntervalSec{0};
+  unsigned int poolRebalancerFreeAllocThreshold{0};
   std::string rebalanceStrategy;
+
+  // common to all strategies
   uint64_t rebalanceMinSlabs{1};
+  // legacy naming, for both LruTailAgeStrategy and HitPerSlabStrategy
   double rebalanceDiffRatio{0.25};
+
+  // rebalance strategy-specific params
+  // LruTailAgeStrategy
+  unsigned int ltaMinTailAgeDifference{100};
+  unsigned int ltaNumSlabsFreeMem{3};
+  unsigned int ltaSlabProjectionLength{1};
+  // HitPerSlabStrategy
+  unsigned int hpsMinDiff{100};
+  unsigned int hpsNumSlabsFreeMem{3};
+  unsigned int hpsMinLruTailAge{0};
+  unsigned int hpsMaxLruTailAge{0};
+  // FreeMemStrategy
+  unsigned int fmNumFreeSlabs{3};
+  size_t fmMaxUnAllocatedSlabs{1000};
+  // MarginalHitsStrategy
+  double mhMovingAverageParam{0.3};
+  unsigned int mhMaxFreeMemSlabs{1};
+
+
+
   bool moveOnSlabRelease{false};
 
   uint64_t htBucketPower{22}; // buckets in hash table
@@ -100,6 +128,8 @@ struct CacheConfig : public JSONConfig {
   // 2Q params
   size_t lru2qHotPct{20};
   size_t lru2qColdPct{20};
+
+  // todo: add TinyFLU params
 
   double allocFactor{1.5};
   // maximum alloc size generated using the alloc factor above.
