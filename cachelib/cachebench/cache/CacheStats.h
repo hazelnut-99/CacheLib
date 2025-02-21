@@ -162,7 +162,6 @@ struct Stats {
         << std::endl;
     out << folly::sformat("RAM Evictions : {:,}", numEvictions) << std::endl;
     
-    // this isn't displaying, todo: figure out why
     out << folly::sformat("Rebalance Num Runs  : {:,}", rebalancerNumRuns) << std::endl;
     out << folly::sformat("Rebalance Num Rebalanced Slabs  : {:,}", rebalancerNumRebalancedSlabs) << std::endl;
     out << folly::sformat("Rebalance Avg Rebalance TimeMs  : {:,}", rebalancerAvgRebalanceTimeMs) << std::endl;

@@ -23,6 +23,7 @@
 #include "cachelib/cachebench/runner/IntegrationStressor.h"
 #include "cachelib/cachebench/workload/BlockChunkReplayGenerator.h"
 #include "cachelib/cachebench/workload/KVReplayGenerator.h"
+#include "cachelib/cachebench/workload/OGBinaryReplayGenerator.h"
 #include "cachelib/cachebench/workload/OnlineGenerator.h"
 #include "cachelib/cachebench/workload/PieceWiseReplayGenerator.h"
 #include "cachelib/cachebench/workload/WorkloadGenerator.h"
@@ -145,6 +146,8 @@ std::unique_ptr<GeneratorBase> makeGenerator(const StressorConfig& config) {
     return std::make_unique<KVReplayGenerator>(config);
   } else if (config.generator == "block-replay") {
     return std::make_unique<BlockChunkReplayGenerator>(config);
+  } else if (config.generator == "oracle-general-replay") {
+    return std::make_unique<OGBinaryReplayGenerator>(config);
   } else if (config.generator.empty() || config.generator == "workload") {
     // TODO: Remove the empty() check once we label workload-based configs
     // properly
