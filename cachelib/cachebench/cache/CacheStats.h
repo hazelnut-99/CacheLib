@@ -149,6 +149,12 @@ struct Stats {
   void render(std::ostream& out) const {
     auto totalMisses = getTotalMisses();
     const double overallHitRatio = invertPctFn(totalMisses, numCacheGets);
+
+    out << folly::sformat("Total Misses  : {:,}", totalMisses) << std::endl;
+    out << folly::sformat("Num Cache Gets Misses  : {:,}", numCacheGetMiss) << std::endl;
+    out << folly::sformat("Num Cache Gets  : {:,}", numCacheGets) << std::endl;
+
+
     out << folly::sformat("Items in RAM  : {:,}", numItems) << std::endl;
     out << folly::sformat("Items in NVM  : {:,}", numNvmItems) << std::endl;
 
@@ -161,13 +167,21 @@ struct Stats {
                           pctFn(numEvictions, evictAttempts))
         << std::endl;
     out << folly::sformat("RAM Evictions : {:,}", numEvictions) << std::endl;
-    
-    out << folly::sformat("Rebalance Num Runs  : {:,}", rebalancerNumRuns) << std::endl;
-    out << folly::sformat("Rebalance Num Rebalanced Slabs  : {:,}", rebalancerNumRebalancedSlabs) << std::endl;
-    out << folly::sformat("Rebalance Avg Rebalance TimeMs  : {:,}", rebalancerAvgRebalanceTimeMs) << std::endl;
-    out << folly::sformat("Rebalance Avg Release TimeMs  : {:,}", rebalancerAvgReleaseTimeMs) << std::endl;
-    out << folly::sformat("Rebalance Avg Pick TimeMs  : {:,}", rebalancerAvgPickTimeMs) << std::endl;
 
+    out << folly::sformat("Rebalance Num Runs  : {:,}", rebalancerNumRuns)
+        << std::endl;
+    out << folly::sformat("Rebalance Num Rebalanced Slabs  : {:,}",
+                          rebalancerNumRebalancedSlabs)
+        << std::endl;
+    out << folly::sformat("Rebalance Avg Rebalance TimeMs  : {:,}",
+                          rebalancerAvgRebalanceTimeMs)
+        << std::endl;
+    out << folly::sformat("Rebalance Avg Release TimeMs  : {:,}",
+                          rebalancerAvgReleaseTimeMs)
+        << std::endl;
+    out << folly::sformat("Rebalance Avg Pick TimeMs  : {:,}",
+                          rebalancerAvgPickTimeMs)
+        << std::endl;
 
     auto foreachAC = [](const auto& map, auto cb) {
       for (auto& pidStat : map) {

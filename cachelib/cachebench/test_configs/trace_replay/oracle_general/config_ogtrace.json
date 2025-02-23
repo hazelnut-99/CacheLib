@@ -1,0 +1,31 @@
+{
+    "cache_config": {
+        "cacheSizeMB": 500,
+        "cacheDir": "/tmp/cachelib_metadata",
+        "allocFactor": 1.08,
+        "maxAllocSize": 524288,
+        "minAllocSize": 64,
+        "htBucketPower": 29,
+        "moveOnSlabRelease": false,
+        "poolResizeIntervalSec": 0,
+        "poolRebalanceIntervalSec": 1,
+        "rebalanceStrategy": "lru-tail"
+    },
+    "test_config": {
+        "generator": "oracle-general-replay",
+        "replayGeneratorConfig": {
+            "ampFactor": 1
+        },
+        "repeatTraceReplay": false,
+        "repeatOpCount": true,
+        "onlySetIfMiss": false,
+        "enableLookaside": true,
+        "timestampFactor": 1,
+        "numOps": 69392150,
+        "numThreads": 1,
+        "prepopulateCache": true,
+        "traceFileNames": [
+            "/users/Hongshu/traces/w06.csv"
+        ]
+    }
+}

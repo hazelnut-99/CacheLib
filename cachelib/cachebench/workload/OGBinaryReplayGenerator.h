@@ -239,9 +239,8 @@ inline bool OGBinaryReplayGenerator::parseRequest(
     uint64_t timestampSeconds = timestampRaw / timestampFactor_;
     req->req_.timestamp = timestampSeconds;
   }
-
-  // Set op, for now, later change to get if miss additional put
-  req->req_.setOp(OpType::kSet);
+  // look-aside get
+  req->req_.setOp(OpType::kGet);
 
   // Set size
   req->sizes_[0] = sizeField.value();
