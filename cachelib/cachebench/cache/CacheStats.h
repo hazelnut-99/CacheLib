@@ -134,6 +134,7 @@ struct Stats {
   int64_t unDestructedItemCount{0};
 
   std::map<PoolId, std::map<ClassId, ACStats>> allocationClassStats;
+  std::map<PoolId, std::map<ClassId, uint64_t>> acEvictionAgeStats;  
 
   // populate the counters related to nvm usage. Cache implementation can decide
   // what to populate since not all of those are interesting when running
@@ -218,6 +219,12 @@ struct Stats {
         }
       };
 
+      foreachAC(acEvictionAgeStats, [&](auto pid, auto cid, auto age) {
+        out << folly::sformat("pid{:2} cid{:4} evictionAge: {:10}", pid, cid,
+                              age)
+            << std::endl;
+      });
+
       foreachAC(allocationClassStats, [&](auto pid, auto cid, auto stats) {
         auto [allocSizeSuffix, allocSize] = formatMemory(stats.allocSize);
         auto [memorySizeSuffix, memorySize] =
@@ -244,8 +251,8 @@ struct Stats {
         }
 
         out << folly::sformat(
-                   "pid{:2} cid{:4} {:8.2f}{} usageFraction: {:4.2f}", pid, cid,
-                   allocSize, allocSizeSuffix, acUsageFraction)
+                   "pid{:2} cid{:4} {:8.2f}{} usageFraction: {:4.2f} freeSlabs: {:4}", pid, cid,
+                   allocSize, allocSizeSuffix, acUsageFraction, stats.freeSlabs)
             << std::endl;
       });
     }

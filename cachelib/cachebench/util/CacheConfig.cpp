@@ -21,6 +21,7 @@
 #include "cachelib/allocator/LruTailAgeStrategy.h"
 #include "cachelib/allocator/FreeMemStrategy.h"
 #include "cachelib/allocator/RandomStrategy.h"
+#include "cachelib/allocator/RandomStrategyNew.h"
 
 namespace facebook {
 namespace cachelib {
@@ -31,6 +32,8 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, cacheSizeMB);
   JSONSetVal(configJson, poolRebalanceIntervalSec);
   JSONSetVal(configJson, poolRebalancerFreeAllocThreshold);
+  JSONSetVal(configJson, poolRebalancerDisableForcedWakeUp);
+  JSONSetVal(configJson, disablePoolRebalancer);
   JSONSetVal(configJson, moveOnSlabRelease);
   JSONSetVal(configJson, rebalanceStrategy);
   JSONSetVal(configJson, rebalanceMinSlabs);
@@ -181,9 +184,9 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     // the default strategy, only rebalance when allocation failures happen.
     return std::make_shared<RebalanceStrategy>();
   } else {
-    // use random strategy to just trigger some slab release.
-    return std::make_shared<RandomStrategy>(
-        RandomStrategy::Config{static_cast<unsigned int>(rebalanceMinSlabs)});
+    // use random strategy (custom impl)
+    return std::make_shared<RandomStrategyNew>(
+      RandomStrategyNew::Config{static_cast<unsigned int>(rebalanceMinSlabs)});
   }
 }
 

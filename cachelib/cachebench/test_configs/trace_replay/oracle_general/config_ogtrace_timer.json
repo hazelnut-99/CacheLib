@@ -8,7 +8,9 @@
         "moveOnSlabRelease": false,
         "poolResizeIntervalSec": 0,
         "poolRebalanceIntervalSec": 1,
-        "rebalanceStrategy": "lru-tail"
+        "rebalanceStrategy": "lru-tail",
+        "useTraceTimeStamp": true,
+        "tickerSynchingSeconds": 1
     },
     "test_config": {
         "generator": "oracle-general-replay",
@@ -19,7 +21,6 @@
         "repeatOpCount": true,
         "onlySetIfMiss": false,
         "enableLookaside": true,
-        "wakeUpPoolRebalancerTraceTimer": false, 
         "timestampFactor": 1,
         "numOps": 10000000,
         "numThreads": 1,

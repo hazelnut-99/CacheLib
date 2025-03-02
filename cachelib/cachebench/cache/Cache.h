@@ -324,7 +324,11 @@ class Cache {
 
   // return the stats for the pool.
   PoolStats getPoolStats(PoolId pid) const { return cache_->getPoolStats(pid); }
-
+  
+  void wakeupPoolRebalancer() {
+    cache_->wakeupPoolRebalancer();
+  }
+  
   // return the total number of inconsistent operations detected since start.
   unsigned int getInconsistencyCount() const {
     return inconsistencyCount_.load(std::memory_order_relaxed);
@@ -527,7 +531,8 @@ Cache<Allocator>::Cache(const CacheConfig& config,
   }
   allocatorConfig_.enablePoolRebalancing(
       config_.getRebalanceStrategy(),
-      std::chrono::seconds(config_.poolRebalanceIntervalSec));
+      std::chrono::seconds(config_.poolRebalanceIntervalSec),
+      config_.poolRebalancerDisableForcedWakeUp);
 
   allocatorConfig_.poolRebalancerFreeAllocThreshold =
       config_.poolRebalancerFreeAllocThreshold;
@@ -788,6 +793,11 @@ Cache<Allocator>::Cache(const CacheConfig& config,
           true /* ensureSufficientMem */);
       pools_.push_back(pid);
     }
+  }
+
+  if (config_.disablePoolRebalancer) {
+    XLOG(INFO, "Cachebench: disabling pool rebalancer");
+    cache_->stopPoolRebalancer(std::chrono::seconds(0));
   }
 
   if (config_.cacheMonitorFactory) {
@@ -1140,6 +1150,7 @@ Stats Cache<Allocator>::getStats() const {
   }
 
   std::map<PoolId, std::map<ClassId, ACStats>> allocationClassStats{};
+  std::map<PoolId, std::map<ClassId, uint64_t>> acEvictionAgeStats{};  
 
   for (size_t pid = 0; pid < pools_.size(); pid++) {
     PoolId poolId = static_cast<PoolId>(pid);
@@ -1147,6 +1158,7 @@ Stats Cache<Allocator>::getStats() const {
     auto cids = poolStats.getClassIds();
     for (auto [cid, stats] : poolStats.mpStats.acStats) {
       allocationClassStats[poolId][cid] = stats;
+      acEvictionAgeStats[poolId][cid] = poolStats.evictionAgeForClass(cid);
     }
   }
 
@@ -1155,6 +1167,7 @@ Stats Cache<Allocator>::getStats() const {
   const auto navyStats = cache_->getNvmCacheStatsMap().toMap();
 
   ret.allocationClassStats = allocationClassStats;
+  ret.acEvictionAgeStats = acEvictionAgeStats;
   ret.numEvictions = aggregate.numEvictions();
   ret.numItems = aggregate.numItems();
   ret.evictAttempts = cacheStats.evictionAttempts;

@@ -388,6 +388,10 @@ class CacheAllocator : public CacheBase {
   // Shared segments will be detached upon destruction
   ~CacheAllocator() override;
 
+  
+  // New method to wake up the pool rebalancer
+  void wakeupPoolRebalancer();
+  
   // create a new cache allocation. The allocation can be initialized
   // appropriately and made accessible through insert or insertOrReplace.
   // If the handle returned from this api is not passed on to
@@ -4496,6 +4500,14 @@ PoolId CacheAllocator<CacheTrait>::addPool(
   }
 
   return pid;
+}
+
+// new method
+template <typename CacheTrait>
+void CacheAllocator<CacheTrait>::wakeupPoolRebalancer() {
+  if (poolRebalancer_) {
+    poolRebalancer_->wakeUp();
+  }
 }
 
 template <typename CacheTrait>
