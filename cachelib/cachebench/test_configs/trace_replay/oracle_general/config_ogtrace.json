@@ -15,11 +15,12 @@
         "replayGeneratorConfig": {
             "ampFactor": 1
         },
+        "useTraceTimer": false,
+        "wakeUpRebalancerEveryXReqs": 0,
         "repeatTraceReplay": false,
         "repeatOpCount": true,
         "onlySetIfMiss": false,
         "enableLookaside": true,
-        "wakeUpPoolRebalancerTraceTimer": false, 
         "timestampFactor": 1,
         "numOps": 10000000,
         "numThreads": 1,

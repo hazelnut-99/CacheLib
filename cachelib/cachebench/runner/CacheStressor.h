@@ -28,6 +28,8 @@
 #include <thread>
 #include <unordered_set>
 
+#include <dlfcn.h>
+
 #include "cachelib/cachebench/cache/Cache.h"
 #include "cachelib/cachebench/cache/TimeStampTicker.h"
 #include "cachelib/cachebench/runner/Stressor.h"
@@ -36,6 +38,8 @@
 #include "cachelib/cachebench/util/Parallel.h"
 #include "cachelib/cachebench/util/Request.h"
 #include "cachelib/cachebench/workload/GeneratorBase.h"
+
+typedef void (*set_mock_time_t)(time_t, long);
 
 namespace facebook {
 namespace cachelib {
@@ -131,14 +135,22 @@ class CacheStressor : public Stressor {
     }
   }
 
-  ~CacheStressor() override { finish(); }
+  ~CacheStressor() override { 
+    finish(); 
+  }
 
   // Start the stress test by spawning the worker threads and waiting for them
   // to finish the stress operations.
   void start() override {
     {
       std::lock_guard<std::mutex> l(timeMutex_);
+      if(config_.useTraceTimer){
+        mockTimerHandle_ = dlopen("/users/Hongshu/libmock_time.so", RTLD_LAZY);
+        setMockTimeFunc_ = (set_mock_time_t)dlsym(mockTimerHandle_, "set_mock_time");
+        setMockTimeFunc_(0, 0);
+      }
       startTime_ = std::chrono::system_clock::now();
+      
     }
     std::cout << folly::sformat("Total {:.2f}M ops to be run",
                                 config_.numThreads * config_.numOps / 1e6)
@@ -183,6 +195,9 @@ class CacheStressor : public Stressor {
     }
     wg_->markShutdown();
     cache_->clearCache(config_.maxInvalidDestructorCount);
+    if (mockTimerHandle_) {
+      dlclose(mockTimerHandle_);
+    }
   }
 
   // abort the stress run by indicating to the workload generator and
@@ -293,6 +308,7 @@ class CacheStressor : public Stressor {
     };
 
     std::optional<uint64_t> lastRequestId = std::nullopt;
+    std::optional<uint64_t> lastRequestTs = std::nullopt;
     for (uint64_t i = 0;
          i < config_.numOps &&
          cache_->getInconsistencyCount() < config_.maxInconsistencyCount &&
@@ -316,10 +332,20 @@ class CacheStressor : public Stressor {
         checkCnt(cache_->getHandleCountForThread());
         SCOPE_EXIT { checkCnt(cache_->getHandleCountForThread()); };
 #endif
+
         ++stats.ops;
 
         const auto pid = static_cast<PoolId>(opPoolDist(gen));
         const Request& req(getReq(pid, gen, lastRequestId));
+
+        if(config_.useTraceTimer && (!lastRequestTs.has_value() || req.timestamp > lastRequestTs)) {
+          setMockTimeFunc_(req.timestamp, 0);
+        }
+
+        if(config_.wakeUpRebalancerEveryXReqs != 0 && i % config_.wakeUpRebalancerEveryXReqs == 0) {
+          cache_->wakeupPoolRebalancer();
+        }
+
         OpType op = req.getOp();
         const std::string* key = &(req.key);
         std::string oneHitKey;
@@ -453,6 +479,7 @@ class CacheStressor : public Stressor {
         }
 
         lastRequestId = req.requestId;
+        lastRequestTs = req.timestamp;
         if (req.requestId) {
           // req might be deleted after calling notifyResult()
           wg_->notifyResult(*req.requestId, result);
@@ -591,6 +618,11 @@ class CacheStressor : public Stressor {
 
   // Whether flash cache has been warmed up
   bool hasNvmCacheWarmedUp_{false};
+
+  // for loading the mock timer shared library
+  void* mockTimerHandle_;
+
+  set_mock_time_t setMockTimeFunc_;
 };
 } // namespace cachebench
 } // namespace cachelib

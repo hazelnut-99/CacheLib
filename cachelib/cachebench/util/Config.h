@@ -186,6 +186,10 @@ struct StressorConfig : public JSONConfig {
   // "async"
   std::string name;
 
+  bool useTraceTimer{false};
+
+  uint64_t wakeUpRebalancerEveryXReqs{0};
+
   // follow get misses with a set
   bool enableLookaside{false};
 

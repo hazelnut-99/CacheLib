@@ -33,7 +33,6 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, poolRebalanceIntervalSec);
   JSONSetVal(configJson, poolRebalancerFreeAllocThreshold);
   JSONSetVal(configJson, poolRebalancerDisableForcedWakeUp);
-  JSONSetVal(configJson, disablePoolRebalancer);
   JSONSetVal(configJson, moveOnSlabRelease);
   JSONSetVal(configJson, rebalanceStrategy);
   JSONSetVal(configJson, rebalanceMinSlabs);

@@ -4753,6 +4753,13 @@ void CacheAllocator<CacheTrait>::releaseSlab(PoolId pid,
   SCOPE_EXIT { stats_.numActiveSlabReleases.dec(); };
   switch (mode) {
   case SlabReleaseMode::kRebalance:
+    // the slab holding the tail item 
+    // if(hint == nullptr) {
+    //   void* memory = findEviction(pid, victim);
+    //   if (memory != nullptr) {
+    //     hint = memory;
+    //   }
+    // }
     stats_.numReleasedForRebalance.inc();
     break;
   case SlabReleaseMode::kResize:

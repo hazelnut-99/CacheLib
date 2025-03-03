@@ -77,7 +77,7 @@ struct CacheConfig : public JSONConfig {
   uint64_t poolRebalanceIntervalSec{0};
   unsigned int poolRebalancerFreeAllocThreshold{0};
   bool poolRebalancerDisableForcedWakeUp{false};
-  bool disablePoolRebalancer{false};
+  
   std::string rebalanceStrategy;
 
   // common to all strategies

@@ -54,7 +54,6 @@ void PoolRebalancer::releaseSlab(PoolId pid,
                                  ClassId victimClassId,
                                  ClassId receiverClassId) {
   const auto now = util::getCurrentTimeMs();
-
   cache_.releaseSlab(pid, victimClassId, receiverClassId,
                      SlabReleaseMode::kRebalance);
   const auto elapsed_time =

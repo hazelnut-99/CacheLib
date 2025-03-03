@@ -795,7 +795,7 @@ Cache<Allocator>::Cache(const CacheConfig& config,
     }
   }
 
-  if (config_.disablePoolRebalancer) {
+  if (config_.poolRebalanceIntervalSec == 0) {
     XLOG(INFO, "Cachebench: disabling pool rebalancer");
     cache_->stopPoolRebalancer(std::chrono::seconds(0));
   }
