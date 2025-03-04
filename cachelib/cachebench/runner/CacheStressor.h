@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <dlfcn.h>
 #include <folly/Random.h>
 #include <folly/TokenBucket.h>
 #include <folly/system/ThreadName.h>
@@ -27,8 +28,6 @@
 #include <memory>
 #include <thread>
 #include <unordered_set>
-
-#include <dlfcn.h>
 
 #include "cachelib/cachebench/cache/Cache.h"
 #include "cachelib/cachebench/cache/TimeStampTicker.h"
@@ -88,6 +87,15 @@ class CacheStressor : public Stressor {
       };
     }
 
+    // this needs to happen befor cache is created
+    if (config_.useTraceTimer) {
+      XLOG(INFO) << "Using trace timer";
+      mockTimerHandle_ = dlopen("/users/Hongshu/libmock_time.so", RTLD_LAZY);
+      setMockTimeFunc_ =
+          (set_mock_time_t)dlsym(mockTimerHandle_, "set_mock_time");
+      setMockTimeFunc_(0, 0);
+    }
+
     if (cacheConfig.useTraceTimeStamp &&
         cacheConfig.tickerSynchingSeconds > 0) {
       // When using trace based replay for generating the workload,
@@ -135,22 +143,14 @@ class CacheStressor : public Stressor {
     }
   }
 
-  ~CacheStressor() override { 
-    finish(); 
-  }
+  ~CacheStressor() override { finish(); }
 
   // Start the stress test by spawning the worker threads and waiting for them
   // to finish the stress operations.
   void start() override {
     {
       std::lock_guard<std::mutex> l(timeMutex_);
-      if(config_.useTraceTimer){
-        mockTimerHandle_ = dlopen("/users/Hongshu/libmock_time.so", RTLD_LAZY);
-        setMockTimeFunc_ = (set_mock_time_t)dlsym(mockTimerHandle_, "set_mock_time");
-        setMockTimeFunc_(0, 0);
-      }
       startTime_ = std::chrono::system_clock::now();
-      
     }
     std::cout << folly::sformat("Total {:.2f}M ops to be run",
                                 config_.numThreads * config_.numOps / 1e6)
@@ -338,11 +338,13 @@ class CacheStressor : public Stressor {
         const auto pid = static_cast<PoolId>(opPoolDist(gen));
         const Request& req(getReq(pid, gen, lastRequestId));
 
-        if(config_.useTraceTimer && (!lastRequestTs.has_value() || req.timestamp > lastRequestTs)) {
+        if (config_.useTraceTimer &&
+            (!lastRequestTs.has_value() || req.timestamp > lastRequestTs)) {
           setMockTimeFunc_(req.timestamp, 0);
         }
 
-        if(config_.wakeUpRebalancerEveryXReqs != 0 && i % config_.wakeUpRebalancerEveryXReqs == 0) {
+        if (config_.wakeUpRebalancerEveryXReqs != 0 &&
+            i % config_.wakeUpRebalancerEveryXReqs == 0) {
           cache_->wakeupPoolRebalancer();
         }
 
