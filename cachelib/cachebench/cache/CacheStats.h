@@ -158,6 +158,7 @@ struct Stats {
 
     out << folly::sformat("Items in RAM  : {:,}", numItems) << std::endl;
     out << folly::sformat("Items in NVM  : {:,}", numNvmItems) << std::endl;
+    out << folly::sformat("Allocation Failures  : {:,}", allocFailures) << std::endl;
 
     out << folly::sformat("Alloc Attempts: {:,} Success: {:.2f}%",
                           allocAttempts,

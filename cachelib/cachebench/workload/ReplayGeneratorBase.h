@@ -30,7 +30,6 @@
 
 #include "cachelib/cachebench/util/Config.h"
 #include "cachelib/cachebench/util/Exceptions.h"
-#include "cachelib/cachebench/workload/ZstdReader.h"
 #include "cachelib/cachebench/workload/GeneratorBase.h"
 
 namespace facebook {
@@ -51,89 +50,6 @@ struct ColumnInfo {
 };
 
 using ColumnTable = std::vector<ColumnInfo>;
-
-
-class ZstdBinaryTraceFileStream {
- public:
- ZstdBinaryTraceFileStream(const StressorConfig& config, int64_t id, size_t recordSize = 24)
-      : configPath_(config.configPath),
-        repeatTraceReplay_(config.repeatTraceReplay),
-        recordSize_(recordSize),
-        keys_{"clockTime", "objId", "objSize", "nextAccessVtime"} {
-    idStr_ = folly::sformat("[{}]", id);
-    if (!config.traceFileName.empty()) {
-      infileNames_.push_back(config.traceFileName);
-    } else {
-      infileNames_ = config.traceFileNames;
-    }
-  }
-
-  void readNextRecord(char* record) {
-    while (!reader_.is_open() || !reader_.readBytesZstd(recordSize_, &record)) {
-      openNextInfile();
-    }
-  }
-
-  void parseRecord(const char* record, uint32_t& clockTime, uint64_t& objId, uint32_t& objSize, int64_t& nextAccessVtime) {
-    clockTime = *reinterpret_cast<const uint32_t*>(record);
-    objId = *reinterpret_cast<const uint64_t*>(record + 4);
-    objSize = *reinterpret_cast<const uint32_t*>(record + 12);
-    nextAccessVtime = *reinterpret_cast<const int64_t*>(record + 16);
-    if (nextAccessVtime == -1 || nextAccessVtime == INT64_MAX) {
-      nextAccessVtime = INT64_MAX;
-    }
-  }
-
-  const std::vector<std::string>& getKeys() const {
-    return keys_;
-  }
-
- private:
-  bool openNextInfile() {
-    if (nextInfileIdx_ >= infileNames_.size()) {
-      if (!repeatTraceReplay_) {
-        throw cachelib::cachebench::EndOfTrace("");
-      }
-
-      XLOGF_EVERY_MS(
-          INFO, 100'000,
-          "{} Reached the end of trace files. Restarting from beginning.",
-          idStr_);
-      nextInfileIdx_ = 0;
-    }
-
-    if (reader_.is_open()) {
-      reader_.closeReader();
-      reader_.clear();
-    }
-
-    const std::string& traceFileName = infileNames_[nextInfileIdx_++];
-
-    std::string filePath;
-    if (traceFileName[0] == '/') {
-      filePath = traceFileName;
-    } else {
-      filePath = folly::sformat("{}/{}", configPath_, traceFileName);
-    }
-
-    if (!reader_.openReader(filePath)) {
-      XLOGF(ERR, "{} Failed to open trace file {}", idStr_, traceFileName);
-      return false;
-    }
-
-    XLOGF(INFO, "{} Opened trace file {}", idStr_, traceFileName);
-    return true;
-  }
-
-  ZstdReader reader_;
-  std::string idStr_;
-  std::string configPath_;
-  const bool repeatTraceReplay_;
-  std::vector<std::string> infileNames_;
-  size_t nextInfileIdx_ = 0;
-  size_t recordSize_;
-  std::vector<std::string> keys_;
-};
 
 
 class TraceFileStream {
