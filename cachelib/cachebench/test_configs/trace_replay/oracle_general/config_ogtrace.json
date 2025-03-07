@@ -25,6 +25,7 @@
         "numOps": 10000000,
         "numThreads": 1,
         "prepopulateCache": true,
+        "zstdTrace": false,
         "traceFileNames": [
             "/users/Hongshu/traces/w105.csv"
         ]

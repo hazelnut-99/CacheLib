@@ -249,6 +249,7 @@ struct StressorConfig : public JSONConfig {
   // relative to the configPath
   std::string traceFileName{};
   std::vector<std::string> traceFileNames{};
+  bool zstdTrace{false};
 
   // location of the path for the files referenced inside the json. If not
   // specified, it defaults to the path of the json file being parsed.

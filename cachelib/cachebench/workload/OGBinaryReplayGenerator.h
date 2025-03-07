@@ -28,6 +28,7 @@
 #include "cachelib/cachebench/util/Parallel.h"
 #include "cachelib/cachebench/util/Request.h"
 #include "cachelib/cachebench/workload/ReplayGeneratorBase.h"
+#include "cachelib/cachebench/workload/ZstdReader.h"
 
 namespace facebook {
 namespace cachelib {
@@ -87,7 +88,11 @@ class OGBinaryReplayGenerator : public ReplayGeneratorBase {
   };
 
   explicit OGBinaryReplayGenerator(const StressorConfig& config)
-      : ReplayGeneratorBase(config), traceStream_(config, 0, columnTable_) {
+      : ReplayGeneratorBase(config), traceStream_(config, 0, columnTable_), zstdReader_() {
+    if(config.zstdTrace){
+      zstdReader_.open(config.traceFileName);
+      XLOGF(INFO, "Reading zstd trace file");
+    }
     for (uint32_t i = 0; i < numShards_; ++i) {
       stressorCtxs_.emplace_back(std::make_unique<StressorCtx>(i));
     }
@@ -134,7 +139,7 @@ class OGBinaryReplayGenerator : public ReplayGeneratorBase {
 
   // for unit test
   bool setHeaderRow(const std::string& header) {
-    return traceStream_.setHeaderRow(header);
+    return config_.zstdTrace ? true : traceStream_.setHeaderRow(header);
   }
 
  private:
@@ -174,6 +179,8 @@ class OGBinaryReplayGenerator : public ReplayGeneratorBase {
   // Read next trace line from TraceFileStream and fill OGReqWrapper
   std::unique_ptr<OGReqWrapper> getReqInternal();
 
+  std::unique_ptr<OGReqWrapper> getReqInternalZstd();
+
   // Used to assign stressorIdx_
   std::atomic<uint32_t> incrementalIdx_{0};
 
@@ -186,6 +193,8 @@ class OGBinaryReplayGenerator : public ReplayGeneratorBase {
   std::vector<std::unique_ptr<StressorCtx>> stressorCtxs_;
 
   TraceFileStream traceStream_;
+
+  ZstdReader zstdReader_;
 
   std::thread genWorker_;
 
@@ -275,11 +284,32 @@ inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternal() {
   return reqWrapper;
 }
 
+inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternalZstd() {
+  auto reqWrapper = std::make_unique<OGReqWrapper>();
+  do {
+    OracleGeneralBinRequest req;
+    if (!zstdReader_.read_one_req(&req)) {
+      throw EndOfTrace("EOF reached");
+    }
+    reqWrapper->key_ = std::to_string(req.objId);
+    reqWrapper->sizes_[0] = req.objSize;
+    reqWrapper->req_.timestamp = req.clockTime;
+    reqWrapper->req_.setOp(OpType::kGet);
+    reqWrapper->repeats_ = 1;
+    parseSuccess++;
+  } while (reqWrapper->repeats_ == 0);
+  return reqWrapper;
+}
+
 inline void OGBinaryReplayGenerator::genRequests() {
   while (!shouldShutdown()) {
     std::unique_ptr<OGReqWrapper> reqWrapper;
     try {
-      reqWrapper = getReqInternal();
+      if(config_.zstdTrace){
+        reqWrapper = getReqInternalZstd();
+      } else {
+        reqWrapper = getReqInternal();
+      }
     } catch (const EndOfTrace&) {
       break;
     }
