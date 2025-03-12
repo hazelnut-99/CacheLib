@@ -1,14 +1,14 @@
 {
     "cache_config": {
         "cacheSizeMB": 500,
-        "allocFactor": 1.08,
-        "maxAllocSize": 524288,
+        "allocFactor": 1.25,
+        "maxAllocSize": 2242880,
         "minAllocSize": 64,
         "htBucketPower": 29,
         "moveOnSlabRelease": false,
         "poolResizeIntervalSec": 0,
         "poolRebalanceIntervalSec": 1,
-        "rebalanceStrategy": "lru-tail"
+        "rebalanceStrategy": "tail-age"
     },
     "test_config": {
         "generator": "oracle-general-replay",

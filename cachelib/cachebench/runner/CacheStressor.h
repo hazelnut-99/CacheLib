@@ -356,6 +356,8 @@ class CacheStressor : public Stressor {
           key = &oneHitKey;
         }
 
+        ClassId cid = cache_->getClassId(pid, *key, *(req.sizeBegin));
+
         OpResultType result(OpResultType::kNop);
         switch (op) {
         case OpType::kLoneSet:
@@ -374,6 +376,7 @@ class CacheStressor : public Stressor {
         }
         case OpType::kLoneGet:
         case OpType::kGet: {
+          cache_->recordAcCacheGet(pid, cid);
           ++stats.get;
 
           auto slock = chainedItemAcquireSharedLock(*key);
@@ -388,6 +391,7 @@ class CacheStressor : public Stressor {
           cache_->recordAccess(*key);
           auto it = cache_->find(*key);
           if (it == nullptr) {
+            cache_->recordAcCacheGetMiss(pid, cid);
             ++stats.getMiss;
             result = OpResultType::kGetMiss;
 

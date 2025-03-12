@@ -136,6 +136,9 @@ struct Stats {
   std::map<PoolId, std::map<ClassId, ACStats>> allocationClassStats;
   std::map<PoolId, std::map<ClassId, uint64_t>> acEvictionAgeStats;  
 
+  std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheGets;
+  std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheMisses;
+
   // populate the counters related to nvm usage. Cache implementation can decide
   // what to populate since not all of those are interesting when running
   // cachebench.
@@ -184,7 +187,24 @@ struct Stats {
     out << folly::sformat("Rebalance Avg Pick TimeMs  : {:,}",
                           rebalancerAvgPickTimeMs)
         << std::endl;
+    
+    for (const auto& [pid, cidMap] : acNumCacheGets) {
+          for (const auto& [cid, numGets] : cidMap) {
+            if(numGets == 0) {
+              continue;
+            }
+            uint64_t numMisses = acNumCacheMisses.at(pid).at(cid);
+            double missRatio = pctFn(numMisses, numGets);
 
+            const auto& stats = allocationClassStats.at(pid).at(cid);
+            auto allocSize = stats.allocSize;
+            auto totalSlabs = stats.freeSlabs + stats.usedSlabs;
+
+            out << folly::sformat("AC_Miss_rate: pid: {:2},cid: {:4},allocSize: {:8},Gets: {:10},missRatio: {:7.2f}%,totalSlabs: {:8}", pid, cid, allocSize, numGets, missRatio, totalSlabs) << std::endl;
+          }
+      }
+
+    
     auto foreachAC = [](const auto& map, auto cb) {
       for (auto& pidStat : map) {
         for (auto& cidStat : pidStat.second) {

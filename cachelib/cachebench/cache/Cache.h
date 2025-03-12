@@ -127,6 +127,9 @@ class Cache {
                        size_t size,
                        uint32_t ttlSecs = 0);
 
+  // derive which allocation class the item belongs                
+  ClassId getClassId(PoolId pid, folly::StringPiece key, size_t size) const;
+
   // inserts the item into the cache and tracks it.
   WriteHandle insertOrReplace(WriteHandle& handle);
 
@@ -377,6 +380,13 @@ class Cache {
   // with a cache directory. TODO (sathya) merge this with shutDown()
   void cleanupSharedMem();
 
+  // Record a cache get operation for a specific pool and class
+  void recordAcCacheGet(PoolId pid, ClassId cid);
+
+  // Record a cache miss operation for a specific pool and class
+  void recordAcCacheGetMiss(PoolId pid, ClassId cid);
+
+
  private:
   // checks for the consistency of the operation for the item
   //
@@ -457,6 +467,10 @@ class Cache {
 
   // number of times the item destructor was called in the cache, if enabled.
   std::atomic<int64_t> totalDestructor_{0};
+
+  std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheGets_;
+  
+  std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheMisses_;
 };
 
 // Specializations are required for each MMType
@@ -936,6 +950,18 @@ typename Cache<Allocator>::WriteHandle Cache<Allocator>::allocate(
 
   return handle;
 }
+
+template <typename Allocator>
+ClassId Cache<Allocator>::getClassId(PoolId pid, folly::StringPiece key, size_t size) const {
+    // number of bytes required for this item
+    const auto requiredSize = Item::getRequiredSize(key, CacheValue::getSize(size));
+    
+    const auto cid = cache_->allocator_->getAllocationClassId(pid, requiredSize);
+
+    return cid;
+}
+
+
 template <typename Allocator>
 typename Cache<Allocator>::WriteHandle Cache<Allocator>::insertOrReplace(
     WriteHandle& handle) {
@@ -1166,6 +1192,8 @@ Stats Cache<Allocator>::getStats() const {
   const auto slabReleaseStats = cache_->getSlabReleaseStats();
   const auto navyStats = cache_->getNvmCacheStatsMap().toMap();
 
+  ret.acNumCacheGets = acNumCacheGets_;
+  ret.acNumCacheMisses = acNumCacheMisses_;
   ret.allocationClassStats = allocationClassStats;
   ret.acEvictionAgeStats = acEvictionAgeStats;
   ret.numEvictions = aggregate.numEvictions();
@@ -1378,4 +1406,15 @@ void Cache<Allocator>::updateItemRecordVersion(WriteHandle& it) {
   itemRecords_.updateItemVersion(*it);
   cache_->invalidateNvm(*it);
 }
+
+template <typename Allocator>
+void Cache<Allocator>::recordAcCacheGet(PoolId pid, ClassId cid) {
+    ++acNumCacheGets_[pid][cid];
+}
+
+template <typename Allocator>
+void Cache<Allocator>::recordAcCacheGetMiss(PoolId pid, ClassId cid) {
+    ++acNumCacheMisses_[pid][cid];
+}
+
 } // namespace facebook::cachelib::cachebench
