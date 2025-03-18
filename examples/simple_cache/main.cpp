@@ -16,6 +16,9 @@
 
 #include "cachelib/allocator/CacheAllocator.h"
 #include "folly/init/Init.h"
+#include <folly/logging/xlog.h>
+#include "folly/logging/LogConfig.h"
+#include "folly/logging/LoggerDB.h"
 
 namespace facebook {
 namespace cachelib_examples {
@@ -64,7 +67,8 @@ int main(int argc, char** argv) {
   folly::init(&argc, &argv);
 
   initializeCache();
-
+  folly::LoggerDB::get().setLevel("", folly::LogLevel::DBG);
+  XLOGF(INFO, "Cache initialized");
   // Use cache
   {
     auto res = put("key", "value");

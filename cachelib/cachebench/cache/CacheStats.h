@@ -139,6 +139,8 @@ struct Stats {
   std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheGets;
   std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheMisses;
 
+  std::map<PoolId, std::vector<std::tuple<ClassId, ClassId>>> rebalanceEvents;
+
   // populate the counters related to nvm usage. Cache implementation can decide
   // what to populate since not all of those are interesting when running
   // cachebench.
@@ -157,6 +159,7 @@ struct Stats {
     out << folly::sformat("Total Misses  : {:,}", totalMisses) << std::endl;
     out << folly::sformat("Num Cache Gets Misses  : {:,}", numCacheGetMiss) << std::endl;
     out << folly::sformat("Num Cache Gets  : {:,}", numCacheGets) << std::endl;
+    out << folly::sformat("Get Miss Ratio : {:.2f}%", invertPctFn(numCacheGetMiss, numCacheGets)) << std::endl;
 
 
     out << folly::sformat("Items in RAM  : {:,}", numItems) << std::endl;
@@ -203,6 +206,16 @@ struct Stats {
             out << folly::sformat("AC_Miss_rate: pid: {:2},cid: {:4},allocSize: {:8},Gets: {:10},missRatio: {:7.2f}%,totalSlabs: {:8}", pid, cid, allocSize, numGets, missRatio, totalSlabs) << std::endl;
           }
       }
+
+    // Inside the render function
+
+    // Print rebalance events
+    for (const auto& [pid, events] : rebalanceEvents) {
+      out << folly::sformat("Rebalancing events, Pool ID: {:2}", pid) << std::endl;
+      for (const auto& [from, to] : events) {
+          out << folly::sformat("  from: {:4} to: {:4}", from, to) << std::endl;
+      }
+    }
 
     
     auto foreachAC = [](const auto& map, auto cb) {

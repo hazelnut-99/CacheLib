@@ -550,15 +550,27 @@ Cache<Allocator>::Cache(const CacheConfig& config,
 
   allocatorConfig_.poolRebalancerFreeAllocThreshold =
       config_.poolRebalancerFreeAllocThreshold;
+  
 
-  if (config_.moveOnSlabRelease && movingSync != nullptr) {
+  // if (config_.moveOnSlabRelease && movingSync != nullptr) {
+  //   XLOGF(INFO, "Enabling moving on slab release");
+  //   allocatorConfig_.enableMovingOnSlabRelease(
+  //       [](Item& oldItem, Item& newItem, Item* parentPtr) {
+  //         XDCHECK(oldItem.isChainedItem() == (parentPtr != nullptr));
+  //         std::memcpy(newItem.getMemory(), oldItem.getMemory(),
+  //                     oldItem.getSize());
+  //       },
+  //       movingSync);
+  // }
+
+  if (config_.moveOnSlabRelease) {
+    XLOGF(INFO, "Enabling moving on slab release");
     allocatorConfig_.enableMovingOnSlabRelease(
         [](Item& oldItem, Item& newItem, Item* parentPtr) {
           XDCHECK(oldItem.isChainedItem() == (parentPtr != nullptr));
           std::memcpy(newItem.getMemory(), oldItem.getMemory(),
                       oldItem.getSize());
-        },
-        movingSync);
+        });
   }
 
   if (config_.allocSizes.empty()) {
@@ -955,7 +967,6 @@ template <typename Allocator>
 ClassId Cache<Allocator>::getClassId(PoolId pid, folly::StringPiece key, size_t size) const {
     // number of bytes required for this item
     const auto requiredSize = Item::getRequiredSize(key, CacheValue::getSize(size));
-    
     const auto cid = cache_->allocator_->getAllocationClassId(pid, requiredSize);
 
     return cid;
@@ -1186,11 +1197,18 @@ Stats Cache<Allocator>::getStats() const {
       allocationClassStats[poolId][cid] = stats;
       acEvictionAgeStats[poolId][cid] = poolStats.evictionAgeForClass(cid);
     }
+    // Populate rebalance events
+    const auto& rebalancer_events = cache_->getAllSlabReleaseEvents(pid).rebalancerEvents;
+    ret.rebalanceEvents[pid].clear();
+    for (const auto& event : rebalancer_events) {
+      ret.rebalanceEvents[pid].emplace_back(event.from, event.to);
+    }
   }
 
   const auto cacheStats = cache_->getGlobalCacheStats();
   const auto slabReleaseStats = cache_->getSlabReleaseStats();
   const auto navyStats = cache_->getNvmCacheStatsMap().toMap();
+
 
   ret.acNumCacheGets = acNumCacheGets_;
   ret.acNumCacheMisses = acNumCacheMisses_;
