@@ -52,6 +52,9 @@ DEFINE_uint64(
 DEFINE_string(progress_stats_file,
               "",
               "Print detailed stats at each progress interval to this file");
+DEFINE_string(dump_result_json_file,
+                "",
+                "Dump interesting counters in json format at the end of the test");
 DEFINE_int32(timeout_seconds,
              0,
              "Maximum allowed seconds for running test. 0 means no timeout");
@@ -160,7 +163,8 @@ int main(int argc, char** argv) {
     setupTimeoutHandler();
 
     return runnerInstance->run(std::chrono::seconds(FLAGS_progress),
-                               FLAGS_progress_stats_file)
+                               FLAGS_progress_stats_file,
+                               FLAGS_dump_result_json_file)
                ? 0
                : 1;
   } catch (const std::exception& e) {

@@ -39,6 +39,9 @@ class MarginalHitsStrategy : public RebalanceStrategy {
     // class
     unsigned int maxFreeMemSlabs{1};
 
+    // enable hold off to avoid thrashings
+    bool enableHoldOff{false};
+
     Config() noexcept {}
     explicit Config(double param) noexcept : Config(param, 1, 1) {}
     Config(double param, unsigned int minSlab, unsigned int maxFree) noexcept

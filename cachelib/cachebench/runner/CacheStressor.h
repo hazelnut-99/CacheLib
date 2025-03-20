@@ -96,6 +96,14 @@ class CacheStressor : public Stressor {
       setMockTimeFunc_(0, 0);
     }
 
+    wakeUpRebalancerEveryXReqs_ = cacheConfig.wakeUpRebalancerEveryXReqs;
+    
+    // try disable all async wake-ups
+    if (wakeUpRebalancerEveryXReqs_ > 0) {
+      cacheConfig.poolRebalanceIntervalSec = 31104000; // 1 year
+      cacheConfig.poolRebalancerDisableForcedWakeUp = true;
+    }
+
     if (cacheConfig.useTraceTimeStamp &&
         cacheConfig.tickerSynchingSeconds > 0) {
       // When using trace based replay for generating the workload,
@@ -110,6 +118,7 @@ class CacheStressor : public Stressor {
     }
     cacheConfig.nvmWriteBytesCallback =
         std::bind(&CacheStressor<Allocator>::getNvmBytesWritten, this);
+
     try {
       cache_ = std::make_unique<CacheT>(
           cacheConfig, movingSync, cacheConfig.cacheDir, config_.touchValue);
@@ -343,8 +352,8 @@ class CacheStressor : public Stressor {
           setMockTimeFunc_(req.timestamp, 0);
         }
 
-        if (config_.wakeUpRebalancerEveryXReqs != 0 &&
-            i % config_.wakeUpRebalancerEveryXReqs == 0) {
+        if (wakeUpRebalancerEveryXReqs_ > 0 &&
+            i % wakeUpRebalancerEveryXReqs_ == 0) {
           cache_->wakeupPoolRebalancer();
         }
 
@@ -629,6 +638,8 @@ class CacheStressor : public Stressor {
   void* mockTimerHandle_;
 
   set_mock_time_t setMockTimeFunc_;
+
+  uint64_t wakeUpRebalancerEveryXReqs_;
 };
 } // namespace cachebench
 } // namespace cachelib

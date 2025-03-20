@@ -188,8 +188,6 @@ struct StressorConfig : public JSONConfig {
 
   bool useTraceTimer{false};
 
-  uint64_t wakeUpRebalancerEveryXReqs{0};
-
   // follow get misses with a set
   bool enableLookaside{false};
 

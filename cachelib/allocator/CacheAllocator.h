@@ -390,7 +390,7 @@ class CacheAllocator : public CacheBase {
 
   
   // New method to wake up the pool rebalancer
-  void wakeupPoolRebalancer();
+  void wakeupPoolRebalancer(bool synchronous = false);
   
   // create a new cache allocation. The allocation can be initialized
   // appropriately and made accessible through insert or insertOrReplace.
@@ -4504,9 +4504,16 @@ PoolId CacheAllocator<CacheTrait>::addPool(
 
 // new method
 template <typename CacheTrait>
-void CacheAllocator<CacheTrait>::wakeupPoolRebalancer() {
+void CacheAllocator<CacheTrait>::wakeupPoolRebalancer(bool synchronous) {
   if (poolRebalancer_) {
-    poolRebalancer_->wakeUp();
+    // synchronously wait for it to finish
+    if(synchronous) {
+      poolRebalancer_->publicWork();
+    } else {
+      poolRebalancer_->wakeUp();
+    }
+  } else {
+    XLOG(INFO, "poolRebalancer_ is null");
   }
 }
 

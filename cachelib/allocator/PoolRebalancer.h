@@ -55,6 +55,8 @@ class PoolRebalancer : public PeriodicWorker {
 
   RebalancerStats getStats() const noexcept;
 
+  void publicWork();
+
  private:
   struct LoopStats {
     // record the count and the time taken

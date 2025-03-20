@@ -43,14 +43,25 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
   std::vector<ClassId> classes(classesSet.begin(), classesSet.end());
   std::unordered_map<ClassId, bool> validVictim;
   std::unordered_map<ClassId, bool> validReceiver;
+  
+
   for (auto it : classes) {
     auto acStats = poolStats.mpStats.acStats;
     // a class can be a victim only if it has more than config.minSlabs slabs
-    validVictim[it] = acStats.at(it).totalSlabs() > config.minSlabs;
+    validVictim[it] = acStats.at(it).totalSlabs() > config.minSlabs ;
     // a class can be a receiver only if its free memory (free allocs, free
     // slabs, etc) is small
     validReceiver[it] = acStats.at(it).getTotalFreeMemory() <
                         config.maxFreeMemSlabs * Slab::kSize;
+
+    // for debugging purposes, what marginal hit score really means
+    XLOGF(DBG,
+          "Pool Id: {}, Class Id: {}, Total slabs: {}, "
+          "Marginal Hits: {}",
+          static_cast<int>(pid),
+          static_cast<int>(it),
+          acStats.at(it).totalSlabs(),
+          scores.at(it));
   }
   if (classStates_[pid].entities.empty()) {
     // initialization
@@ -60,7 +71,10 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     }
   }
   classStates_[pid].updateRankings(scores, config.movingAverageParam);
-  return pickVictimAndReceiverFromRankings(pid, validVictim, validReceiver);
+  
+  // new logic: try avoid thrashings by hold off
+  RebalanceContext ctx = pickVictimAndReceiverFromRankings(pid, validVictim, validReceiver);
+  return ctx;
 }
 
 ClassId MarginalHitsStrategy::pickVictimImpl(const CacheBase& cache,

@@ -77,6 +77,7 @@ struct CacheConfig : public JSONConfig {
   uint64_t poolRebalanceIntervalSec{0};
   unsigned int poolRebalancerFreeAllocThreshold{0};
   bool poolRebalancerDisableForcedWakeUp{false};
+  uint64_t wakeUpRebalancerEveryXReqs{0};
   
   std::string rebalanceStrategy;
 
@@ -101,6 +102,7 @@ struct CacheConfig : public JSONConfig {
   // MarginalHitsStrategy
   double mhMovingAverageParam{0.3};
   unsigned int mhMaxFreeMemSlabs{1};
+  bool mhEnableHoldOff{false};
 
   bool moveOnSlabRelease{false};
 

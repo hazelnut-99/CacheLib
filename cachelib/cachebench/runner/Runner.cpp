@@ -26,7 +26,8 @@ Runner::Runner(const CacheBenchConfig& config)
                                        config.getStressorConfig())} {}
 
 bool Runner::run(std::chrono::seconds progressInterval,
-                 const std::string& progressStatsFile) {
+                 const std::string& progressStatsFile,
+                 const std::string& dumpResultJsonFile) {
   ProgressTracker tracker{*stressor_, progressStatsFile};
 
   stressor_->start();
@@ -47,6 +48,11 @@ bool Runner::run(std::chrono::seconds progressInterval,
 
   std::cout << "\n== Throughput for  ==\n";
   opsStats.render(durationNs, std::cout);
+
+  if (!dumpResultJsonFile.empty()) {
+    std::cout << "== Writing result to json file" <<  dumpResultJsonFile  << std::endl;
+    cacheStats.renderToJson(dumpResultJsonFile);
+  }
 
   stressor_->renderWorkloadGeneratorStats(durationNs, std::cout);
   std::cout << std::endl;

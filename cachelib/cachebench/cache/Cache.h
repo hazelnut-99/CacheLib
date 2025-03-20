@@ -27,6 +27,7 @@
 
 #include <atomic>
 #include <iostream>
+#include <limits>
 
 #include "cachelib/allocator/CacheAllocator.h"
 #include "cachelib/allocator/HitsPerSlabStrategy.h"
@@ -329,7 +330,8 @@ class Cache {
   PoolStats getPoolStats(PoolId pid) const { return cache_->getPoolStats(pid); }
   
   void wakeupPoolRebalancer() {
-    cache_->wakeupPoolRebalancer();
+    // synchronously
+    cache_->wakeupPoolRebalancer(true);
   }
   
   // return the total number of inconsistent operations detected since start.
@@ -543,6 +545,7 @@ Cache<Allocator>::Cache(const CacheConfig& config,
   if (config_.rebalanceStrategy == "marginal-hits") {
     allocatorConfig_.enableTailHitsTracking();
   }
+  XLOGF(INFO, "Using rebalance interval: {}", config_.poolRebalanceIntervalSec);
   allocatorConfig_.enablePoolRebalancing(
       config_.getRebalanceStrategy(),
       std::chrono::seconds(config_.poolRebalanceIntervalSec),
@@ -821,7 +824,7 @@ Cache<Allocator>::Cache(const CacheConfig& config,
     }
   }
 
-  if (config_.poolRebalanceIntervalSec == 0) {
+  if (config_.rebalanceStrategy == "disabled") {
     XLOG(INFO, "Cachebench: disabling pool rebalancer");
     cache_->stopPoolRebalancer(std::chrono::seconds(0));
   }
@@ -1262,6 +1265,7 @@ Stats Cache<Allocator>::getStats() const {
   ret.evictionSuccessesForSlabRelease = slabReleaseStats.numEvictionSuccesses;
 
   ret.rebalancerNumRuns = cacheStats.rebalancerStats.numRuns;
+  ret.rebalancerPickVictimRounds = cacheStats.rebalancerStats.pickVictimRounds;
   ret.rebalancerNumRebalancedSlabs =
       cacheStats.rebalancerStats.numRebalancedSlabs;
   ret.rebalancerAvgRebalanceTimeMs =

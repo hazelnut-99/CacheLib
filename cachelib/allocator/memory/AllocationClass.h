@@ -476,6 +476,9 @@ class AllocationClass {
   // Afterwards, the multiple threads can proceed in parallel to
   // complete the slab release
   std::mutex startSlabReleaseLock_;
+  
+  // random generator for choosing slabs
+  mutable std::mt19937 rng_;
 
   // maximum number of free allocs to walk through during pruning
   // before dropping the lock

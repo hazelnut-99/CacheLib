@@ -123,6 +123,7 @@ struct Stats {
   uint64_t numNvmRejectsByClean{0};
 
   uint64_t rebalancerNumRuns{0};
+  uint64_t rebalancerPickVictimRounds{0};
   uint64_t rebalancerNumRebalancedSlabs{0};
   uint64_t rebalancerAvgRebalanceTimeMs{0};
   uint64_t rebalancerAvgReleaseTimeMs{0};
@@ -152,6 +153,98 @@ struct Stats {
   // errors from the nvm engine.
   std::unordered_map<std::string, double> nvmErrors;
 
+  void renderToJson(const std::string& filename) const {
+    folly::dynamic json = folly::dynamic::object;
+  
+    auto totalMisses = getTotalMisses();
+    const double overallHitRatio = invertPctFn(totalMisses, numCacheGets);
+  
+    json["totalMissCnt"] = totalMisses;
+    json["getMissCnt"] = numCacheGetMiss;
+    json["getCnt"] = numCacheGets;
+    json["getMissRatio"] = invertPctFn(numCacheGetMiss, numCacheGets);
+  
+    json["ramItem"] = numItems;
+    json["nvmItem"] = numNvmItems;
+    json["allocFailures"] = allocFailures;
+  
+    json["allocAttempts"] = allocAttempts;
+    json["evicAttempts"] = evictAttempts;
+    json["numEvictions"] = numEvictions;
+    json["ramEvictions"] = numEvictions;
+  
+    json["rebalancerNumRuns"] = rebalancerNumRuns;
+    json["rebalancerPickVictimRounds"] = rebalancerPickVictimRounds;
+    json["rebalancerNumRebalancedSlabs"] = rebalancerNumRebalancedSlabs;
+    json["rebalancerAvgRebalanceTimeMs"] = rebalancerAvgRebalanceTimeMs;
+    json["rebalancerAvgReleaseTimeMs"] = rebalancerAvgReleaseTimeMs;
+    json["rebalancerAvgPickTimeMs"] = rebalancerAvgPickTimeMs;
+  
+    folly::dynamic acMissRates = folly::dynamic::array;
+    for (const auto& [pid, cidMap] : acNumCacheGets) {
+      for (const auto& [cid, numGets] : cidMap) {
+        if (numGets == 0) {
+          continue;
+        }
+        uint64_t numMisses = acNumCacheMisses.at(pid).at(cid);
+        double missRatio = pctFn(numMisses, numGets);
+  
+        const auto& stats = allocationClassStats.at(pid).at(cid);
+        auto allocSize = stats.allocSize;
+        auto totalSlabs = stats.freeSlabs + stats.usedSlabs;
+  
+        acMissRates.push_back(folly::dynamic::object
+          ("pid", pid)
+          ("cid", cid)
+          ("allocSize", allocSize)
+          ("getCnt", numGets)
+          ("getMissCnt", numMisses)
+          ("getMissRatio", missRatio)
+          ("totalSlabs", totalSlabs));
+      }
+    }
+    json["acStats"] = acMissRates;
+  
+    folly::dynamic rebalanceEventsJson = folly::dynamic::array;
+    for (const auto& [pid, events] : rebalanceEvents) {
+      folly::dynamic eventArray = folly::dynamic::array;
+      for (const auto& [from, to] : events) {
+        eventArray.push_back(folly::dynamic::object("from", from)("to", to));
+      }
+      rebalanceEventsJson.push_back(folly::dynamic::object("pid", pid)("events", eventArray));
+    }
+    json["rebalanceEvents"] = rebalanceEventsJson;
+  
+    folly::dynamic poolUsageJson = folly::dynamic::array;
+    for (auto pid = 0U; pid < poolUsageFraction.size(); pid++) {
+      poolUsageJson.push_back(folly::dynamic::object("pid", pid)("usage", poolUsageFraction[pid]));
+    }
+    json["poolUsageFraction"] = poolUsageJson;
+
+    folly::dynamic evictionAgeJson = folly::dynamic::array;
+    auto foreachAC = [](const auto& map, auto cb) {
+      for (const auto& pidStat : map) {
+        for (const auto& cidStat : pidStat.second) {
+          cb(pidStat.first, cidStat.first, cidStat.second);
+        }
+      }
+    };
+  
+    foreachAC(acEvictionAgeStats, [&](auto pid, auto cid, auto age) {
+      evictionAgeJson.push_back(folly::dynamic::object("pid", pid)("cid", cid)("evictionAge", age));
+    });
+    json["acEvictionAgeStats"] = evictionAgeJson;
+  
+    std::string jsonString = folly::toJson(json);
+    std::ofstream outFile(filename);
+    if (outFile.is_open()) {
+      outFile << jsonString;
+      outFile.close();
+    } else {
+      throw std::runtime_error("Unable to open file: " + filename);
+    }
+  }  
+
   void render(std::ostream& out) const {
     auto totalMisses = getTotalMisses();
     const double overallHitRatio = invertPctFn(totalMisses, numCacheGets);
@@ -178,6 +271,8 @@ struct Stats {
 
     out << folly::sformat("Rebalance Num Runs  : {:,}", rebalancerNumRuns)
         << std::endl;
+    out << folly::sformat("Rebalance Num Pick Victim Runs  : {:,}", rebalancerPickVictimRounds)
+        << std::endl; 
     out << folly::sformat("Rebalance Num Rebalanced Slabs  : {:,}",
                           rebalancerNumRebalancedSlabs)
         << std::endl;

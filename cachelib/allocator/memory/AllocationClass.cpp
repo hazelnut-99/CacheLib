@@ -41,6 +41,7 @@ using namespace facebook::cachelib;
 constexpr unsigned int AllocationClass::kFreeAllocsPruneLimit;
 constexpr unsigned int AllocationClass::kFreeAllocsPruneSleepMicroSecs;
 constexpr unsigned int AllocationClass::kForEachAllocPrefetchOffset;
+constexpr uint32_t kSeed = 12345;
 
 AllocationClass::AllocationClass(ClassId classId,
                                  PoolId poolId,
@@ -50,7 +51,8 @@ AllocationClass::AllocationClass(ClassId classId,
       poolId_(poolId),
       allocationSize_(allocSize),
       slabAlloc_(s),
-      freedAllocations_{slabAlloc_.createPtrCompressor<FreeAlloc>()} {
+      freedAllocations_{slabAlloc_.createPtrCompressor<FreeAlloc>()},
+      rng_(kSeed) {
   checkState();
 }
 
@@ -204,7 +206,7 @@ const Slab* AllocationClass::getSlabForReleaseLocked() const noexcept {
     return freeSlabs_.front();
   } else if (!allocatedSlabs_.empty()) {
     auto idx =
-        folly::Random::rand32(static_cast<uint32_t>(allocatedSlabs_.size()));
+        folly::Random::rand32(static_cast<uint32_t>(allocatedSlabs_.size()), rng_);
     return allocatedSlabs_[idx];
   }
   return nullptr;

@@ -50,6 +50,21 @@ void PoolRebalancer::work() {
   }
 }
 
+void PoolRebalancer::publicWork() {
+  try {
+    XLOG(DBG, "synchronous rebalancing");
+    for (const auto pid : cache_.getRegularPoolIds()) {
+      auto strategy = cache_.getRebalanceStrategy(pid);
+      if (!strategy) {
+        strategy = defaultStrategy_;
+      }
+      tryRebalancing(pid, *strategy);
+    }
+  } catch (const std::exception& ex) {
+    XLOGF(ERR, "Rebalancing interrupted due to exception: {}", ex.what());
+  }
+}
+
 void PoolRebalancer::releaseSlab(PoolId pid,
                                  ClassId victimClassId,
                                  ClassId receiverClassId) {
@@ -147,6 +162,7 @@ RebalancerStats PoolRebalancer::getStats() const noexcept {
 
   stats.lastPickTimeMs = pickVictimStats_.getLastLoopTimeMs();
   stats.avgPickTimeMs = pickVictimStats_.getAvgLoopTimeMs();
+  stats.pickVictimRounds = pickVictimStats_.getNumLoops();
   return stats;
 }
 

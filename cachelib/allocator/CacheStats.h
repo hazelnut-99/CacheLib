@@ -291,6 +291,7 @@ struct RebalancerStats {
   uint64_t numRuns{0};
 
   uint64_t numRebalancedSlabs{0};
+  uint64_t pickVictimRounds{0};
 
   uint64_t lastRebalanceTimeMs{0};
   uint64_t avgRebalanceTimeMs{0};
