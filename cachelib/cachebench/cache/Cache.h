@@ -388,6 +388,10 @@ class Cache {
   // Record a cache miss operation for a specific pool and class
   void recordAcCacheGetMiss(PoolId pid, ClassId cid);
 
+  std::map<PoolId, std::map<ClassId, uint64_t>> fetchAcCacheGetDelta();
+
+  std::map<PoolId, std::map<ClassId, uint64_t>> fetchAcCacheGetMissDelta();
+
 
  private:
   // checks for the consistency of the operation for the item
@@ -473,6 +477,10 @@ class Cache {
   std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheGets_;
   
   std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheMisses_;
+
+  std::map<PoolId, std::map<ClassId, uint64_t>> prevAcNumCacheGets_;
+  std::map<PoolId, std::map<ClassId, uint64_t>> prevAcNumCacheMisses_;
+
 };
 
 // Specializations are required for each MMType
@@ -553,6 +561,9 @@ Cache<Allocator>::Cache(const CacheConfig& config,
 
   allocatorConfig_.poolRebalancerFreeAllocThreshold =
       config_.poolRebalancerFreeAllocThreshold;
+  allocatorConfig_.countColdTailHitsOnly = config_.countColdTailHitsOnly;
+  allocatorConfig_.tailSlabCnt = config_.tailSlabCnt;
+  allocatorConfig_.normalizeTailHits = config_.normalizeTailHits;
   
 
   // if (config_.moveOnSlabRelease && movingSync != nullptr) {
@@ -1437,6 +1448,58 @@ void Cache<Allocator>::recordAcCacheGet(PoolId pid, ClassId cid) {
 template <typename Allocator>
 void Cache<Allocator>::recordAcCacheGetMiss(PoolId pid, ClassId cid) {
     ++acNumCacheMisses_[pid][cid];
+}
+
+// Implementation of fetchAcCacheGetDelta
+template <typename Allocator>
+std::map<PoolId, std::map<ClassId, uint64_t>> Cache<Allocator>::fetchAcCacheGetDelta() {
+    std::map<PoolId, std::map<ClassId, uint64_t>> delta;
+
+    for (const auto& [poolId, classMap] : acNumCacheGets_) {
+        for (const auto& [classId, currentCount] : classMap) {
+            uint64_t previousCount = 0;
+
+            // Check if the pool and class exist in the previous state
+            if (prevAcNumCacheGets_.count(poolId) &&
+                prevAcNumCacheGets_[poolId].count(classId)) {
+                previousCount = prevAcNumCacheGets_[poolId][classId];
+            }
+
+            // Calculate the delta
+            delta[poolId][classId] = currentCount - previousCount;
+        }
+    }
+
+    // Update the previous state with the current state
+    prevAcNumCacheGets_ = acNumCacheGets_;
+
+    return delta;
+}
+
+// Implementation of fetchAcCacheGetMissDelta
+template <typename Allocator>
+std::map<PoolId, std::map<ClassId, uint64_t>> Cache<Allocator>::fetchAcCacheGetMissDelta() {
+    std::map<PoolId, std::map<ClassId, uint64_t>> delta;
+
+    for (const auto& [poolId, classMap] : acNumCacheMisses_) {
+        for (const auto& [classId, currentCount] : classMap) {
+            uint64_t previousCount = 0;
+
+            // Check if the pool and class exist in the previous state
+            if (prevAcNumCacheMisses_.count(poolId) &&
+                prevAcNumCacheMisses_[poolId].count(classId)) {
+                previousCount = prevAcNumCacheMisses_[poolId][classId];
+            }
+
+            // Calculate the delta
+            delta[poolId][classId] = currentCount - previousCount;
+        }
+    }
+
+    // Update the previous state with the current state
+    prevAcNumCacheMisses_ = acNumCacheMisses_;
+
+    return delta;
 }
 
 } // namespace facebook::cachelib::cachebench

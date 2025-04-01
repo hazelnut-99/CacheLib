@@ -20,6 +20,8 @@
 
 #include <algorithm>
 #include <functional>
+#include <folly/json.h>
+#include <folly/dynamic.h>
 
 #include "cachelib/allocator/Util.h"
 
@@ -44,24 +46,40 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
   std::unordered_map<ClassId, bool> validVictim;
   std::unordered_map<ClassId, bool> validReceiver;
   
+  auto& poolState = getPoolState(pid);
+
+  const auto poolEvictionAgeStats =
+      cache.getPoolEvictionAgeStats(pid, 0);
 
   for (auto it : classes) {
     auto acStats = poolStats.mpStats.acStats;
     // a class can be a victim only if it has more than config.minSlabs slabs
-    validVictim[it] = acStats.at(it).totalSlabs() > config.minSlabs ;
+    validVictim[it] = acStats.at(it).totalSlabs() > config.minSlabs;
     // a class can be a receiver only if its free memory (free allocs, free
     // slabs, etc) is small
-    validReceiver[it] = acStats.at(it).getTotalFreeMemory() <
-                        config.maxFreeMemSlabs * Slab::kSize;
+    validReceiver[it] = (acStats.at(it).getTotalFreeMemory() <
+                        config.maxFreeMemSlabs * Slab::kSize) && 
+                        (!config.filterReceiverByEvictionRate || poolState.at(it).getDeltaEvictions(poolStats) > 0);
 
-    // for debugging purposes, what marginal hit score really means
-    XLOGF(DBG,
-          "Pool Id: {}, Class Id: {}, Total slabs: {}, "
-          "Marginal Hits: {}",
-          static_cast<int>(pid),
-          static_cast<int>(it),
-          acStats.at(it).totalSlabs(),
-          scores.at(it));
+    // for debugging purposes
+    folly::dynamic logData = folly::dynamic::object
+    ("pool_id", static_cast<int>(pid))
+    ("class_id", static_cast<int>(it))
+    ("class_total_slabs", acStats.at(it).totalSlabs())
+    ("class_marginal_hits", scores.at(it))
+    ("class_free_slabs", acStats.at(it).freeSlabs)
+    ("class_free_allocs", acStats.at(it).freeAllocs)
+    ("class_delta_evictions", poolState.at(it).getDeltaEvictions(poolStats))
+    ("class_alloc_failures", poolState.at(it).deltaAllocFailures(poolStats))
+    ("delta_cold_hits", poolState.at(it).getColdHits(poolStats))
+    ("delta_warm_hits", poolState.at(it).getWarmHits(poolStats))
+    ("delta_hot_hits", poolState.at(it).getHotHits(poolStats))
+    ("delta_total_hits", poolState.at(it).getColdHits(poolStats) + poolState.at(it).getWarmHits(poolStats) + poolState.at(it).getHotHits(poolStats))
+    ("class_oldest_element_age", poolEvictionAgeStats.getOldestElementAge(it))
+    ("pool_all_slabs_allocated", cache.getPool(pid).allSlabsAllocated());
+
+    std::string jsonString = folly::toJson(logData);
+    XLOGF(DBG, "Rebalance_states_logging: {}", jsonString);
   }
   if (classStates_[pid].entities.empty()) {
     // initialization
@@ -71,9 +89,15 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     }
   }
   classStates_[pid].updateRankings(scores, config.movingAverageParam);
-  
-  // new logic: try avoid thrashings by hold off
   RebalanceContext ctx = pickVictimAndReceiverFromRankings(pid, validVictim, validReceiver);
+  if (ctx.victimClassId != Slab::kInvalidClassId 
+      && ctx.receiverClassId != Slab::kInvalidClassId
+      && ctx.victimClassId != ctx.receiverClassId) {
+    if((scores.at(ctx.receiverClassId) - scores.at(ctx.victimClassId)) < config.minDiff){
+      XLOG(DBG, " Not enough to trigger slab rebalancing");
+    }
+  }
+
   return ctx;
 }
 

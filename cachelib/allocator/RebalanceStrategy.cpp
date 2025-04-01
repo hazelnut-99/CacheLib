@@ -59,7 +59,11 @@ void RebalanceStrategy::initPoolState(PoolId pid, const PoolStats& stats) {
     curr[id] =
         Info{id, stats.mpStats.acStats.at(id).totalSlabs(),
              stats.cacheStats.at(id).numEvictions(), stats.numHitsForClass(id),
-             stats.cacheStats.at(id).containerStat.numTailAccesses};
+             stats.cacheStats.at(id).containerStat.numTailAccesses,
+             stats.cacheStats.at(id).containerStat.numColdAccesses,
+             stats.cacheStats.at(id).containerStat.numWarmAccesses,
+             stats.cacheStats.at(id).containerStat.numHotAccesses,
+            };
   }
 }
 

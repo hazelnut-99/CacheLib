@@ -4513,7 +4513,7 @@ void CacheAllocator<CacheTrait>::wakeupPoolRebalancer(bool synchronous) {
       poolRebalancer_->wakeUp();
     }
   } else {
-    XLOG(INFO, "poolRebalancer_ is null");
+    XLOG(DBG, "poolRebalancer_ is null");
   }
 }
 
@@ -4554,11 +4554,10 @@ void CacheAllocator<CacheTrait>::overridePoolConfig(PoolId pid,
   auto& pool = allocator_->getPool(pid);
   for (unsigned int cid = 0; cid < pool.getNumClassId(); ++cid) {
     MMConfig mmConfig = config;
-    mmConfig.addExtraConfig(
-        config_.trackTailHits
+    mmConfig.addExtraConfig(config_.trackTailHits
             ? pool.getAllocationClass(static_cast<ClassId>(cid))
-                  .getAllocsPerSlab()
-            : 0);
+                  .getAllocsPerSlab() * config_.tailSlabCnt
+            : 0, config_.countColdTailHitsOnly, config_.normalizeTailHits);
     DCHECK_NOTNULL(mmContainers_[pid][cid].get());
     mmContainers_[pid][cid]->setConfig(mmConfig);
   }
@@ -4572,8 +4571,8 @@ void CacheAllocator<CacheTrait>::createMMContainers(const PoolId pid,
     config.addExtraConfig(
         config_.trackTailHits
             ? pool.getAllocationClass(static_cast<ClassId>(cid))
-                  .getAllocsPerSlab()
-            : 0);
+                  .getAllocsPerSlab() * config_.tailSlabCnt
+            : 0, config_.countColdTailHitsOnly, config_.normalizeTailHits);
     mmContainers_[pid][cid].reset(new MMContainer(config, compressor_));
   }
 }

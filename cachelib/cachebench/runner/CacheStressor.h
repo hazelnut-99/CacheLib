@@ -354,6 +354,23 @@ class CacheStressor : public Stressor {
 
         if (wakeUpRebalancerEveryXReqs_ > 0 &&
             i % wakeUpRebalancerEveryXReqs_ == 0) {
+              std::map<PoolId, std::map<ClassId, uint64_t>> getDelta = cache_->fetchAcCacheGetDelta();
+              std::map<PoolId, std::map<ClassId, uint64_t>> missDelta = cache_->fetchAcCacheGetMissDelta();
+              
+              // Print the delta for both gets and misses
+              for (const auto& [poolId, classMap] : getDelta) {
+                  for (const auto& [classId, getDeltaValue] : classMap) {
+                      uint64_t missDeltaValue = 0;
+              
+                      // Check if the same key exists in the missDelta map
+                      if (missDelta.count(poolId) && missDelta[poolId].count(classId)) {
+                          missDeltaValue = missDelta[poolId][classId];
+                      }
+      
+                      XLOGF(DBG, "Miss count from the simulator: PoolId: {}, ClassId: {}, Get Delta: {}, Miss Delta: {}",
+                        poolId, classId, getDeltaValue, missDeltaValue);
+                  }
+              }
           cache_->wakeupPoolRebalancer();
         }
 

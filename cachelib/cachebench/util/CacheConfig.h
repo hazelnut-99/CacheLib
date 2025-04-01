@@ -100,9 +100,14 @@ struct CacheConfig : public JSONConfig {
   unsigned int fmNumFreeSlabs{3};
   size_t fmMaxUnAllocatedSlabs{1000};
   // MarginalHitsStrategy
+  double mhMinDiff{1};
   double mhMovingAverageParam{0.3};
   unsigned int mhMaxFreeMemSlabs{1};
   bool mhEnableHoldOff{false};
+  bool countColdTailHitsOnly{false};
+  bool normalizeTailHits{false};
+  unsigned int tailSlabCnt{1};
+  bool mhFilterReceiverByEvictionRate{false};
 
   bool moveOnSlabRelease{false};
 

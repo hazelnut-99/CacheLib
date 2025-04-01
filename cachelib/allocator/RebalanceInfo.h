@@ -47,6 +47,12 @@ struct Info {
   // accumulative number of hits in the tail slab of this allocation class
   uint64_t accuTailHits{0};
 
+  uint64_t accuColdHits{0};
+
+  uint64_t accuWarmHits{0};
+
+  uint64_t accuHotHits{0};
+
   // TODO(sugak) this is changed to unblock the LLVM upgrade The fix is not
   // completely understood, but it's a safe change T16521551 - Info() noexcept
   // = default;
@@ -55,8 +61,11 @@ struct Info {
        unsigned long long slabs,
        unsigned long long evicts,
        uint64_t h,
-       uint64_t th) noexcept
-      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th) {}
+       uint64_t th,
+       uint64_t ch,
+       uint64_t wh,
+       uint64_t hh) noexcept
+      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh) {}
 
   // number of rounds we hold off for when we acquire a slab.
   static constexpr unsigned int kNumHoldOffRounds = 10;
@@ -144,6 +153,21 @@ struct Info {
            accuTailHits;
   }
 
+  uint64_t getColdHits(const PoolStats& poolStats) const {
+    return poolStats.cacheStats.at(id).containerStat.numColdAccesses -
+           accuColdHits;
+  }
+
+  uint64_t getWarmHits(const PoolStats& poolStats) const {
+    return poolStats.cacheStats.at(id).containerStat.numWarmAccesses -
+           accuWarmHits;
+  }
+
+  uint64_t getHotHits(const PoolStats& poolStats) const {
+    return poolStats.cacheStats.at(id).containerStat.numHotAccesses -
+           accuHotHits;
+  }
+
   // returns true if the hold off is active for this alloc class.
   bool isOnHoldOff() const noexcept { return holdOffRemaining > 0; }
 
@@ -176,6 +200,12 @@ struct Info {
 
     // update tail hits
     accuTailHits = cacheStats.containerStat.numTailAccesses;
+
+    accuColdHits = cacheStats.containerStat.numColdAccesses;
+
+    accuWarmHits = cacheStats.containerStat.numWarmAccesses;
+
+    accuHotHits = cacheStats.containerStat.numHotAccesses;
 
     allocFailures = cacheStats.allocFailures;
   }

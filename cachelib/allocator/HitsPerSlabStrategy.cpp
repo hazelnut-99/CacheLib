@@ -85,6 +85,13 @@ ClassId HitsPerSlabStrategy::pickVictim(const Config& config,
     }
   }
 
+  for (auto it = victims.begin(); it != victims.end(); ++it) {
+    const auto id = *it;
+    const auto nSlab = stats.numSlabsForClass(id);
+    const auto deltaHitsValue = poolState.at(id).deltaHits(stats);
+    XLOGF(DBG, "Class ID: {}, nSlab: {}, deltaHits: {}", static_cast<int>(id), nSlab, deltaHitsValue);
+  }
+
   return *std::min_element(
       victims.begin(), victims.end(), [&](ClassId a, ClassId b) {
         double weight_a =
@@ -193,7 +200,7 @@ RebalanceContext HitsPerSlabStrategy::pickVictimAndReceiverImpl(
       improvement < config.minDiff ||
       improvement < config.diffRatio * static_cast<long double>(
                                            victimProjectedDeltaHitsPerSlab)) {
-    XLOG(DBG, " Not enough to trigger slab rebalancing");
+    XLOG(DBG, " Not enough to trigger slab rebalancing, diffRatio: {}", config.diffRatio);
     return kNoOpContext;
   }
 

@@ -285,6 +285,19 @@ struct Stats {
     out << folly::sformat("Rebalance Avg Pick TimeMs  : {:,}",
                           rebalancerAvgPickTimeMs)
         << std::endl;
+
+    out << folly::sformat("moveAttemptsForSlabRelease  : {:,}",
+        moveAttemptsForSlabRelease)
+        << std::endl;
+    out << folly::sformat("moveSuccessesForSlabRelease  : {:,}",
+        moveSuccessesForSlabRelease)
+        << std::endl;
+    out << folly::sformat("evictionAttemptsForSlabRelease  : {:,}",
+      evictionAttemptsForSlabRelease)
+          << std::endl;
+    out << folly::sformat("evictionSuccessesForSlabRelease  : {:,}",
+        evictionSuccessesForSlabRelease)
+          << std::endl;
     
     for (const auto& [pid, cidMap] : acNumCacheGets) {
           for (const auto& [cid, numGets] : cidMap) {

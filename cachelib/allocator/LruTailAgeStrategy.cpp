@@ -169,9 +169,10 @@ RebalanceContext LruTailAgeStrategy::pickVictimAndReceiverImpl(
     const auto receiverTailAge =
         getOldestElementAge(poolEvictionAgeStats, ctx.receiverClassId);
 
-    XLOGF(DBG, "Rebalancing: receiver = {}, receiverTailAge = {}, victim = {}",
+    XLOGF(DBG, "Rebalancing: receiver = {}, receiverTailAge = {}, victim = {}, victimProjectedTailAge = {}",
           static_cast<int>(ctx.receiverClassId), receiverTailAge,
-          static_cast<int>(ctx.victimClassId));
+          static_cast<int>(ctx.victimClassId),
+          static_cast<int>(victimProjectedTailAge));
 
     const auto improvement = victimProjectedTailAge - receiverTailAge;
     if (victimProjectedTailAge < receiverTailAge ||
