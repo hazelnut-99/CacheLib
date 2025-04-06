@@ -64,7 +64,7 @@ class MM2Q {
   using SerializationConfigType = serialization::MM2QConfig;
   using SerializationTypeContainer = serialization::MM2QCollection;
 
-  enum LruType { Warm, WarmTail, Hot, Cold, ColdTail, NumTypes };
+  enum LruType { Warm, WarmTail, Hot, HotTail, Cold, ColdTail, NumTypes };
 
   // Config class for MM2Q
   struct Config {
@@ -657,6 +657,7 @@ class MM2Q {
     uint64_t numWarmAccesses_{0};
 
     // number of hits in tail parts
+    uint64_t numHotTailAccesses_{0};
     uint64_t numWarmTailAccesses_{0};
     uint64_t numColdTailAccesses_{0};
 
@@ -707,7 +708,8 @@ MM2Q::Container<T, HookPtr>::Container(const serialization::MM2QObject& object,
   // tail lists (WarmTail & ColdTail), in order to potentially avoid cold roll
   if (object.lrus()->lists()->size() < LruType::NumTypes) {
     XDCHECK_EQ(false, tailTrackingEnabled_);
-    XDCHECK_EQ(object.lrus()->lists()->size() + 2, LruType::NumTypes);
+    XDCHECK_EQ(object.lrus()->lists()->size() + 3, LruType::NumTypes);
+    lru_.insertEmptyListAt(LruType::HotTail, compressor);
     lru_.insertEmptyListAt(LruType::WarmTail, compressor);
     lru_.insertEmptyListAt(LruType::ColdTail, compressor);
   }
@@ -732,7 +734,14 @@ bool MM2Q::Container<T, HookPtr>::recordAccess(T& node,
         return false;
       }
       if (isHot(node)) {
-        lru_.getList(LruType::Hot).moveToHead(node);
+        if (inTail(node)) {
+          unmarkTail(node);
+          lru_.getList(LruType::HotTail).remove(node);
+          lru_.getList(LruType::Hot).linkAtHead(node);
+          ++numHotTailAccesses_;
+        } else {
+          lru_.getList(LruType::Hot).moveToHead(node);
+        }
         ++numHotAccesses_;
       } else if (isCold(node)) {
         if (inTail(node)) {
@@ -808,10 +817,11 @@ cachelib::EvictionAgeStat MM2Q::Container<T, HookPtr>::getEvictionAgeStatLocked(
   EvictionAgeStat stat;
 
   stat.hotQueueStat.oldestElementAge =
-      getOldestAgeLocked(LruType::Hot, currTime);
-  stat.hotQueueStat.size = lru_.getList(LruType::Hot).size();
+      getOldestAgeLocked(LruType::HotTail, currTime);
+  stat.hotQueueStat.size = lru_.getList(LruType::Hot).size() +
+                           lru_.getList(LruType::HotTail).size();
   stat.hotQueueStat.projectedAge =
-      getProjectedAge(LruType::Hot, stat.hotQueueStat.oldestElementAge);
+      getProjectedAge(LruType::HotTail, stat.hotQueueStat.oldestElementAge);
 
   // sum the tail and the main list for the ones that have tail.
   stat.warmQueueStat.oldestElementAge =
@@ -842,7 +852,7 @@ template <typename T, MM2Q::Hook<T> T::* HookPtr>
 typename MM2Q::LruType MM2Q::Container<T, HookPtr>::getLruType(
     const T& node) const noexcept {
   if (isHot(node)) {
-    return LruType::Hot;
+    return inTail(node) ? LruType::HotTail : LruType::Hot;
   }
   if (isCold(node)) {
     return inTail(node) ? LruType::ColdTail : LruType::Cold;
@@ -852,21 +862,24 @@ typename MM2Q::LruType MM2Q::Container<T, HookPtr>::getLruType(
 
 template <typename T, MM2Q::Hook<T> T::* HookPtr>
 void MM2Q::Container<T, HookPtr>::rebalance() noexcept {
+  
+  auto popFrom = [&](LruType lruType) -> T* {
+    auto& lru = lru_.getList(lruType);
+    T* node = lru.getTail();
+    XDCHECK(node);
+    lru.remove(*node);
+    if (lruType == WarmTail || lruType == ColdTail || lruType == HotTail) {
+      unmarkTail(*node);
+    }
+    return node;
+  };
+  
   // shrink Warm (and WarmTail) if their total size is larger than expected
   size_t expectedSize = config_.getWarmSizePercent() * lru_.size() / 100;
   while (lru_.getList(LruType::Warm).size() +
              lru_.getList(LruType::WarmTail).size() >
          expectedSize) {
-    auto popFrom = [&](LruType lruType) -> T* {
-      auto& lru = lru_.getList(lruType);
-      T* node = lru.getTail();
-      XDCHECK(node);
-      lru.remove(*node);
-      if (lruType == WarmTail || lruType == ColdTail) {
-        unmarkTail(*node);
-      }
-      return node;
-    };
+
     // remove from warm tail if it is not empty. if empty, remove from warm.
     T* node = lru_.getList(LruType::WarmTail).size() > 0
                   ? popFrom(LruType::WarmTail)
@@ -878,17 +891,23 @@ void MM2Q::Container<T, HookPtr>::rebalance() noexcept {
 
   // shrink Hot if its size is larger than expected
   expectedSize = config_.hotSizePercent * lru_.size() / 100;
-  while (lru_.getList(LruType::Hot).size() > expectedSize) {
-    auto node = lru_.getList(LruType::Hot).getTail();
-    XDCHECK(node);
+
+  while (lru_.getList(LruType::Hot).size() +
+             lru_.getList(LruType::HotTail).size() >
+         expectedSize) {
+
+    T* node = lru_.getList(LruType::HotTail).size() > 0
+          ? popFrom(LruType::HotTail)
+          : popFrom(LruType::Hot);
+
     XDCHECK(isHot(*node));
-    lru_.getList(LruType::Hot).remove(*node);
     lru_.getList(LruType::Cold).linkAtHead(*node);
     unmarkHot(*node);
     markCold(*node);
   }
 
   // adjust tail sizes for Cold and Warm
+  adjustTail(LruType::Hot);
   adjustTail(LruType::Cold);
   adjustTail(LruType::Warm);
 }
@@ -1010,6 +1029,9 @@ bool MM2Q::Container<T, HookPtr>::replace(T& oldNode, T& newNode) noexcept {
     LruType type = getLruType(oldNode);
     lru_.getList(type).replace(oldNode, newNode);
     switch (type) {
+    case LruType::HotTail:
+      markTail(newNode);
+      [[fallthrough]]; // pass through to also mark hot
     case LruType::Hot:
       markHot(newNode);
       break;
@@ -1038,6 +1060,8 @@ bool MM2Q::Container<T, HookPtr>::replace(T& oldNode, T& newNode) noexcept {
 template <typename T, MM2Q::Hook<T> T::* HookPtr>
 MM2Q::LruType MM2Q::Container<T, HookPtr>::getTailLru(LruType list) const {
   switch (list) {
+  case LruType::Hot:
+    return LruType::HotTail;
   case LruType::Warm:
     return LruType::WarmTail;
   case LruType::Cold:
@@ -1107,34 +1131,43 @@ MMContainerStat MM2Q::Container<T, HookPtr>::getStats() const noexcept {
 
     auto coldTailSize = lru_.getList(LruType::ColdTail).size();
     auto warmTailSize = lru_.getList(LruType::WarmTail).size();
+    auto hotTailSize = lru_.getList(LruType::HotTail).size();
 
-    auto numColdTailAccessesNormalized =
-        (config_.normalizeTailHits && coldTailSize)
-            ? static_cast<uint64_t>(numColdTailAccesses_ * config_.tailSize /
-                                    coldTailSize)
-            : numColdTailAccesses_;
-    auto numWarmTailAccessesNormalized =
-        (config_.normalizeTailHits && warmTailSize)
-            ? static_cast<uint64_t>(numWarmTailAccesses_ * config_.tailSize /
-                                    warmTailSize)
-            : numWarmTailAccesses_;
+    auto normalizeTailAccesses = [&](uint64_t numTailAccesses, size_t tailSize) {
+      return (config_.normalizeTailHits && tailSize)
+                 ? static_cast<uint64_t>(numTailAccesses * config_.tailSize / tailSize)
+                 : numTailAccesses;
+    };
+  
+    auto numColdTailAccessesNormalized = normalizeTailAccesses(numColdTailAccesses_, coldTailSize);
+    auto numWarmTailAccessesNormalized = normalizeTailAccesses(numWarmTailAccesses_, warmTailSize);
+    auto numHotTailAccessesNormalized = normalizeTailAccesses(numHotTailAccesses_, hotTailSize);
 
     uint64_t numTailAccesses =
-        config_.countColdTailHitsOnly
-            ? numColdTailAccessesNormalized
-            : computeWeightedAccesses(numWarmTailAccessesNormalized,
-                                      numColdTailAccessesNormalized);
+        config_.hotSizePercent == 100 ? numHotTailAccessesNormalized : 
+            (config_.countColdTailHitsOnly
+                ? numColdTailAccessesNormalized
+                : (computeWeightedAccesses(numWarmTailAccessesNormalized,
+                                          numColdTailAccessesNormalized)));
 
     // tail count should be normalized? * config_.tailSize/warmtailsize;
     // config_.tailSize/coldtailsize
     XLOGF(DBG,
-          "2Q expected tail size: {}, warm tail size: {}, cold tail size: {}, "
-          "warm tail hits: {}, cold tail hits: {}, normalized cold tail hits: "
-          "{}, normalized warm tail hits: {}, weighted numTailAccesses: {}",
-          config_.tailSize, lru_.getList(LruType::WarmTail).size(),
-          lru_.getList(LruType::ColdTail).size(), numWarmTailAccesses_,
-          numColdTailAccesses_, numColdTailAccessesNormalized,
-          numWarmTailAccessesNormalized, numTailAccesses);
+          "2Q expected tail size: {}, hot tail size: {}, warm tail size: {}, cold tail size: {}\n"
+          "hot tail hits: {}, warm tail hits: {}, cold tail hits: {}\n"
+          "normalized hot tail hits: {}, normalized warm tail hits: {}, normalized cold tail hits: {}\n"
+          "weighted numTailAccesses: {}",
+          config_.tailSize, 
+          lru_.getList(LruType::HotTail).size(),
+          lru_.getList(LruType::WarmTail).size(),
+          lru_.getList(LruType::ColdTail).size(), 
+          numHotTailAccesses_,
+          numWarmTailAccesses_,
+          numColdTailAccesses_, 
+          numHotTailAccessesNormalized,
+          numWarmTailAccessesNormalized, 
+          numColdTailAccessesNormalized,
+          numTailAccesses);
 
     return MMContainerStat{lru_.size(),
                            tail == nullptr ? 0 : getUpdateTime(*tail),
