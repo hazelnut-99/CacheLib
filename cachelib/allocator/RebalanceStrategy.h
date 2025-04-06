@@ -50,6 +50,7 @@ class RebalanceStrategy {
     MarginalHits,
     FreeMem,
     HitsPerSlab,
+    HitsPerTailSlab,
     LruTailAge,
     PoolResize,
     StressRebalance,

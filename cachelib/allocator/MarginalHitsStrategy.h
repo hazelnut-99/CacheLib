@@ -47,6 +47,8 @@ class MarginalHitsStrategy : public RebalanceStrategy {
 
     bool filterReceiverByEvictionRate{false};
 
+    unsigned int tailSlabCnt{1};
+
     Config() noexcept {}
     explicit Config(double param) noexcept : Config(param, 1, 1) {}
     Config(double param, unsigned int minSlab, unsigned int maxFree) noexcept
@@ -87,7 +89,7 @@ class MarginalHitsStrategy : public RebalanceStrategy {
  private:
   // compute delta of tail hits for every class in this pool
   std::unordered_map<ClassId, double> computeClassMarginalHits(
-      PoolId pid, const PoolStats& poolStats);
+      PoolId pid, const PoolStats& poolStats, unsigned int tailSlabCnt);
 
   // pick victim and receiver according to smoothed rankings
   RebalanceContext pickVictimAndReceiverFromRankings(

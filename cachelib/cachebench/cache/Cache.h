@@ -550,7 +550,7 @@ Cache<Allocator>::Cache(const CacheConfig& config,
       itemRecords_(config_.enableItemDestructorCheck) {
   constexpr size_t MB = 1024ULL * 1024ULL;
 
-  if (config_.rebalanceStrategy == "marginal-hits") {
+  if (config_.rebalanceStrategy == "marginal-hits" || config_.rebalanceStrategy == "hits-per-tail-slab") {
     allocatorConfig_.enableTailHitsTracking();
   }
   XLOGF(INFO, "Using rebalance interval: {}", config_.poolRebalanceIntervalSec);
@@ -563,7 +563,6 @@ Cache<Allocator>::Cache(const CacheConfig& config,
       config_.poolRebalancerFreeAllocThreshold;
   allocatorConfig_.countColdTailHitsOnly = config_.countColdTailHitsOnly;
   allocatorConfig_.tailSlabCnt = config_.tailSlabCnt;
-  allocatorConfig_.normalizeTailHits = config_.normalizeTailHits;
   
 
   // if (config_.moveOnSlabRelease && movingSync != nullptr) {

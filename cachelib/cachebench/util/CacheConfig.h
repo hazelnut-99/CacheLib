@@ -105,7 +105,6 @@ struct CacheConfig : public JSONConfig {
   unsigned int mhMaxFreeMemSlabs{1};
   bool mhEnableHoldOff{false};
   bool countColdTailHitsOnly{false};
-  bool normalizeTailHits{false};
   unsigned int tailSlabCnt{1};
   bool mhFilterReceiverByEvictionRate{false};
 

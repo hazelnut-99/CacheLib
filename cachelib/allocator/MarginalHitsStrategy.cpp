@@ -40,7 +40,7 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
           static_cast<int>(pid));
     return kNoOpContext;
   }
-  auto scores = computeClassMarginalHits(pid, poolStats);
+  auto scores = computeClassMarginalHits(pid, poolStats, config.tailSlabCnt);
   auto classesSet = poolStats.getClassIds();
   std::vector<ClassId> classes(classesSet.begin(), classesSet.end());
   std::unordered_map<ClassId, bool> validVictim;
@@ -98,6 +98,10 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     }
   }
 
+  for (const auto i : poolStats.getClassIds()) {
+    poolState[i].updateTailHits(poolStats);
+  }
+
   return ctx;
 }
 
@@ -109,12 +113,13 @@ ClassId MarginalHitsStrategy::pickVictimImpl(const CacheBase& cache,
 
 std::unordered_map<ClassId, double>
 MarginalHitsStrategy::computeClassMarginalHits(PoolId pid,
-                                               const PoolStats& poolStats) {
+                                               const PoolStats& poolStats,
+                                               unsigned int tailSlabCnt) {
   const auto& poolState = getPoolState(pid);
   std::unordered_map<ClassId, double> scores;
   for (auto info : poolState) {
     if (info.id != Slab::kInvalidClassId) {
-      scores[info.id] = info.getMarginalHits(poolStats);
+      scores[info.id] = info.getMarginalHits(poolStats, tailSlabCnt);
     }
   }
   return scores;

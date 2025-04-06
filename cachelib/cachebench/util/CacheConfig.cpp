@@ -16,10 +16,11 @@
 
 #include "cachelib/cachebench/util/CacheConfig.h"
 
-#include "cachelib/allocator/HitsPerSlabStrategy.h"
-#include "cachelib/allocator/MarginalHitsStrategy.h"
-#include "cachelib/allocator/LruTailAgeStrategy.h"
 #include "cachelib/allocator/FreeMemStrategy.h"
+#include "cachelib/allocator/HitsPerSlabStrategy.h"
+#include "cachelib/allocator/HitsPerTailSlabStrategy.h"
+#include "cachelib/allocator/LruTailAgeStrategy.h"
+#include "cachelib/allocator/MarginalHitsStrategy.h"
 #include "cachelib/allocator/RandomStrategy.h"
 #include "cachelib/allocator/RandomStrategyNew.h"
 
@@ -56,7 +57,6 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, mhEnableHoldOff);
   JSONSetVal(configJson, mhMinDiff);
   JSONSetVal(configJson, countColdTailHitsOnly);
-  JSONSetVal(configJson, normalizeTailHits);
   JSONSetVal(configJson, tailSlabCnt);
   JSONSetVal(configJson, mhFilterReceiverByEvictionRate);
 
@@ -174,13 +174,26 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     hpsConfig.minLruTailAge = hpsMinLruTailAge;
     hpsConfig.maxLruTailAge = hpsMaxLruTailAge;
     return std::make_shared<HitsPerSlabStrategy>(hpsConfig);
-  } else if (rebalanceStrategy == "marginal-hits") {
+  } else if (rebalanceStrategy == "hits-per-tail-slab") {
+    HitsPerTailSlabStrategy::Config hptsConfig;
+    hptsConfig.minDiff = hpsMinDiff;
+    hptsConfig.diffRatio = rebalanceDiffRatio;
+    hptsConfig.minSlabs = rebalanceMinSlabs;
+    hptsConfig.numSlabsFreeMem = hpsNumSlabsFreeMem;
+    hptsConfig.minLruTailAge = hpsMinLruTailAge;
+    hptsConfig.maxLruTailAge = hpsMaxLruTailAge;
+    hptsConfig.tailSlabCnt = tailSlabCnt;
+    return std::make_shared<HitsPerTailSlabStrategy>(hptsConfig);
+  }
+
+  else if (rebalanceStrategy == "marginal-hits") {
     MarginalHitsStrategy::Config mhConfig;
     mhConfig.minSlabs = rebalanceMinSlabs;
     mhConfig.movingAverageParam = mhMovingAverageParam;
     mhConfig.maxFreeMemSlabs = mhMaxFreeMemSlabs;
     mhConfig.enableHoldOff = mhEnableHoldOff;
     mhConfig.minDiff = mhMinDiff;
+    mhConfig.tailSlabCnt = tailSlabCnt;
     mhConfig.filterReceiverByEvictionRate = mhFilterReceiverByEvictionRate;
     return std::make_shared<MarginalHitsStrategy>(mhConfig);
   } else if (rebalanceStrategy == "free-mem") {
@@ -194,8 +207,8 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     return std::make_shared<RebalanceStrategy>();
   } else {
     // use random strategy (custom impl)
-    return std::make_shared<RandomStrategyNew>(
-      RandomStrategyNew::Config{static_cast<unsigned int>(rebalanceMinSlabs)});
+    return std::make_shared<RandomStrategyNew>(RandomStrategyNew::Config{
+        static_cast<unsigned int>(rebalanceMinSlabs)});
   }
 }
 

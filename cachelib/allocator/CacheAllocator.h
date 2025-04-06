@@ -4557,7 +4557,7 @@ void CacheAllocator<CacheTrait>::overridePoolConfig(PoolId pid,
     mmConfig.addExtraConfig(config_.trackTailHits
             ? pool.getAllocationClass(static_cast<ClassId>(cid))
                   .getAllocsPerSlab() * config_.tailSlabCnt
-            : 0, config_.countColdTailHitsOnly, config_.normalizeTailHits);
+            : 0, config_.countColdTailHitsOnly);
     DCHECK_NOTNULL(mmContainers_[pid][cid].get());
     mmContainers_[pid][cid]->setConfig(mmConfig);
   }
@@ -4572,7 +4572,7 @@ void CacheAllocator<CacheTrait>::createMMContainers(const PoolId pid,
         config_.trackTailHits
             ? pool.getAllocationClass(static_cast<ClassId>(cid))
                   .getAllocsPerSlab() * config_.tailSlabCnt
-            : 0, config_.countColdTailHitsOnly, config_.normalizeTailHits);
+            : 0, config_.countColdTailHitsOnly);
     mmContainers_[pid][cid].reset(new MMContainer(config, compressor_));
   }
 }

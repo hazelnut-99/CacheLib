@@ -307,11 +307,9 @@ class MM2Q {
 
     // adding extra config after generating the config: tailSize
     void addExtraConfig(size_t tSize,
-                        bool coldOnly = false,
-                        bool normalize = false) {
+                        bool coldOnly = false) {
       tailSize = tSize;
       countColdTailHitsOnly = coldOnly;
-      normalizeTailHits = normalize;
     }
 
     // threshold value in seconds to compare with a node's update time to
@@ -354,8 +352,6 @@ class MM2Q {
     size_t tailSize{0};
     // when tracking tail hits, count cold count only.
     bool countColdTailHitsOnly{false};
-
-    bool normalizeTailHits{false};
 
     // Minimum interval between reconfigurations. If 0, reconfigure is never
     // called.
@@ -1132,30 +1128,19 @@ MMContainerStat MM2Q::Container<T, HookPtr>::getStats() const noexcept {
     auto coldTailSize = lru_.getList(LruType::ColdTail).size();
     auto warmTailSize = lru_.getList(LruType::WarmTail).size();
     auto hotTailSize = lru_.getList(LruType::HotTail).size();
-
-    auto normalizeTailAccesses = [&](uint64_t numTailAccesses, size_t tailSize) {
-      return (config_.normalizeTailHits && tailSize)
-                 ? static_cast<uint64_t>(numTailAccesses * config_.tailSize / tailSize)
-                 : numTailAccesses;
-    };
   
-    auto numColdTailAccessesNormalized = normalizeTailAccesses(numColdTailAccesses_, coldTailSize);
-    auto numWarmTailAccessesNormalized = normalizeTailAccesses(numWarmTailAccesses_, warmTailSize);
-    auto numHotTailAccessesNormalized = normalizeTailAccesses(numHotTailAccesses_, hotTailSize);
 
     uint64_t numTailAccesses =
-        config_.hotSizePercent == 100 ? numHotTailAccessesNormalized : 
+        config_.hotSizePercent == 100 ? numHotTailAccesses_ : 
             (config_.countColdTailHitsOnly
-                ? numColdTailAccessesNormalized
-                : (computeWeightedAccesses(numWarmTailAccessesNormalized,
-                                          numColdTailAccessesNormalized)));
+                ? numColdTailAccesses_
+                : (computeWeightedAccesses(numWarmTailAccesses_,
+                  numColdTailAccesses_)));
 
-    // tail count should be normalized? * config_.tailSize/warmtailsize;
     // config_.tailSize/coldtailsize
     XLOGF(DBG,
           "2Q expected tail size: {}, hot tail size: {}, warm tail size: {}, cold tail size: {}\n"
           "hot tail hits: {}, warm tail hits: {}, cold tail hits: {}\n"
-          "normalized hot tail hits: {}, normalized warm tail hits: {}, normalized cold tail hits: {}\n"
           "weighted numTailAccesses: {}",
           config_.tailSize, 
           lru_.getList(LruType::HotTail).size(),
@@ -1164,9 +1149,6 @@ MMContainerStat MM2Q::Container<T, HookPtr>::getStats() const noexcept {
           numHotTailAccesses_,
           numWarmTailAccesses_,
           numColdTailAccesses_, 
-          numHotTailAccessesNormalized,
-          numWarmTailAccessesNormalized, 
-          numColdTailAccessesNormalized,
           numTailAccesses);
 
     return MMContainerStat{lru_.size(),

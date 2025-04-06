@@ -521,7 +521,6 @@ class CacheAllocatorConfig {
   bool countColdTailHitsOnly{false};
   // when doing tail hits tracking, how many items are considered as the tail.
   unsigned int tailSlabCnt{1};
-  bool normalizeTailHits{false};  
 
   // Memory monitoring config
   MemoryMonitor::Config memMonitorConfig;
@@ -1188,7 +1187,6 @@ std::map<std::string, std::string> CacheAllocatorConfig<T>::serialize() const {
   configMap["trackTailHits"] = std::to_string(trackTailHits);
   configMap["countColdTailHitsOnly"] = std::to_string(countColdTailHitsOnly);
   configMap["tailSlabCnt"] = std::to_string(tailSlabCnt); 
-  configMap["normalizeTailHits"] = std::to_string(normalizeTailHits);
   // Stringify enum
   switch (memMonitorConfig.mode) {
   case MemoryMonitor::FreeMemory:
@@ -1290,6 +1288,8 @@ std::string CacheAllocatorConfig<T>::stringifyRebalanceStrategy(
     return "PickNothingOrTest";
   case RebalanceStrategy::Random:
     return "Random";
+  case RebalanceStrategy::HitsPerTailSlab:
+    return "HitsPerTailSlab";
   case RebalanceStrategy::MarginalHits:
     return "MarginalHits";
   case RebalanceStrategy::FreeMem:

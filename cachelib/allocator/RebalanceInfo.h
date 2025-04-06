@@ -148,9 +148,13 @@ struct Info {
   //
   // @param poolStats  the current pool stats for this pool.
   // @return the marginal hits
-  uint64_t getMarginalHits(const PoolStats& poolStats) const {
-    return poolStats.cacheStats.at(id).containerStat.numTailAccesses -
+  uint64_t getMarginalHits(const PoolStats& poolStats, unsigned int tailSlabCnt) const {
+    auto marginalHits =  poolStats.cacheStats.at(id).containerStat.numTailAccesses -
            accuTailHits;
+    auto totalSlabs = poolStats.numSlabsForClass(id);
+    auto trueTailSize = (tailSlabCnt > totalSlabs ? totalSlabs : tailSlabCnt);
+    // marginal hits per slab (todo: future this may need changes)
+    return marginalHits / (trueTailSize > 0 ? trueTailSize : 1);
   }
 
   uint64_t getColdHits(const PoolStats& poolStats) const {
@@ -186,6 +190,11 @@ struct Info {
     hits = poolStats.numHitsForClass(id);
   }
 
+  void updateTailHits(const PoolStats& poolStats) noexcept {
+    const auto& cacheStats = poolStats.cacheStats.at(id);
+    accuTailHits = cacheStats.containerStat.numTailAccesses;
+  }
+
   // updates the current record to store the current state of slabs and the
   // evictions we see.
   void updateRecord(const PoolStats& poolStats) {
@@ -199,7 +208,7 @@ struct Info {
     evictions = cacheStats.numEvictions();
 
     // update tail hits
-    accuTailHits = cacheStats.containerStat.numTailAccesses;
+    //accuTailHits = cacheStats.containerStat.numTailAccesses;
 
     accuColdHits = cacheStats.containerStat.numColdAccesses;
 
