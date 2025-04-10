@@ -388,10 +388,9 @@ class CacheAllocator : public CacheBase {
   // Shared segments will be detached upon destruction
   ~CacheAllocator() override;
 
-  
   // New method to wake up the pool rebalancer
-  void wakeupPoolRebalancer(bool synchronous = false);
-  
+  void wakeupPoolRebalancer(bool synchronous = false, uint64_t request_id = 0);
+
   // create a new cache allocation. The allocation can be initialized
   // appropriately and made accessible through insert or insertOrReplace.
   // If the handle returned from this api is not passed on to
@@ -4504,11 +4503,12 @@ PoolId CacheAllocator<CacheTrait>::addPool(
 
 // new method
 template <typename CacheTrait>
-void CacheAllocator<CacheTrait>::wakeupPoolRebalancer(bool synchronous) {
+void CacheAllocator<CacheTrait>::wakeupPoolRebalancer(bool synchronous,
+                                                      uint64_t request_id) {
   if (poolRebalancer_) {
     // synchronously wait for it to finish
-    if(synchronous) {
-      poolRebalancer_->publicWork();
+    if (synchronous) {
+      poolRebalancer_->publicWork(request_id);
     } else {
       poolRebalancer_->wakeUp();
     }
@@ -4554,10 +4554,13 @@ void CacheAllocator<CacheTrait>::overridePoolConfig(PoolId pid,
   auto& pool = allocator_->getPool(pid);
   for (unsigned int cid = 0; cid < pool.getNumClassId(); ++cid) {
     MMConfig mmConfig = config;
-    mmConfig.addExtraConfig(config_.trackTailHits
+    mmConfig.addExtraConfig(
+        config_.trackTailHits
             ? pool.getAllocationClass(static_cast<ClassId>(cid))
-                  .getAllocsPerSlab() * config_.tailSlabCnt
-            : 0, config_.countColdTailHitsOnly);
+                      .getAllocsPerSlab() *
+                  config_.tailSlabCnt
+            : 0,
+        config_.countColdTailHitsOnly);
     DCHECK_NOTNULL(mmContainers_[pid][cid].get());
     mmContainers_[pid][cid]->setConfig(mmConfig);
   }
@@ -4571,8 +4574,10 @@ void CacheAllocator<CacheTrait>::createMMContainers(const PoolId pid,
     config.addExtraConfig(
         config_.trackTailHits
             ? pool.getAllocationClass(static_cast<ClassId>(cid))
-                  .getAllocsPerSlab() * config_.tailSlabCnt
-            : 0, config_.countColdTailHitsOnly);
+                      .getAllocsPerSlab() *
+                  config_.tailSlabCnt
+            : 0,
+        config_.countColdTailHitsOnly);
     mmContainers_[pid][cid].reset(new MMContainer(config, compressor_));
   }
 }
@@ -4759,7 +4764,7 @@ void CacheAllocator<CacheTrait>::releaseSlab(PoolId pid,
   SCOPE_EXIT { stats_.numActiveSlabReleases.dec(); };
   switch (mode) {
   case SlabReleaseMode::kRebalance:
-    // the slab holding the tail item 
+    // the slab holding the tail item
     // if(hint == nullptr) {
     //   void* memory = findEviction(pid, victim);
     //   if (memory != nullptr) {

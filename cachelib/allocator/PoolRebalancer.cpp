@@ -50,7 +50,7 @@ void PoolRebalancer::work() {
   }
 }
 
-void PoolRebalancer::publicWork() {
+void PoolRebalancer::publicWork(uint64_t request_id) {
   try {
     XLOG(DBG, "synchronous rebalancing");
     for (const auto pid : cache_.getRegularPoolIds()) {
@@ -58,7 +58,7 @@ void PoolRebalancer::publicWork() {
       if (!strategy) {
         strategy = defaultStrategy_;
       }
-      tryRebalancing(pid, *strategy);
+      tryRebalancing(pid, *strategy, request_id);
     }
   } catch (const std::exception& ex) {
     XLOGF(ERR, "Rebalancing interrupted due to exception: {}", ex.what());
@@ -67,7 +67,8 @@ void PoolRebalancer::publicWork() {
 
 void PoolRebalancer::releaseSlab(PoolId pid,
                                  ClassId victimClassId,
-                                 ClassId receiverClassId) {
+                                 ClassId receiverClassId,
+                                uint64_t request_id) {
   const auto now = util::getCurrentTimeMs();
   cache_.releaseSlab(pid, victimClassId, receiverClassId,
                      SlabReleaseMode::kRebalance);
@@ -82,12 +83,19 @@ void PoolRebalancer::releaseSlab(PoolId pid,
     receiverAllocSize = poolStats.allocSizeForClass(receiverClassId);
     receiverEvictionAge = poolStats.evictionAgeForClass(receiverClassId);
   }
+  // stats_.addSlabReleaseEvent(
+  //     victimClassId, receiverClassId, elapsed_time, pid,
+  //     poolStats.numSlabsForClass(victimClassId), numSlabsInReceiver,
+  //     poolStats.allocSizeForClass(victimClassId), receiverAllocSize,
+  //     poolStats.evictionAgeForClass(victimClassId), receiverEvictionAge,
+  //     poolStats.mpStats.acStats.at(victimClassId).freeAllocs);
+  // workaround to track request_id
   stats_.addSlabReleaseEvent(
-      victimClassId, receiverClassId, elapsed_time, pid,
-      poolStats.numSlabsForClass(victimClassId), numSlabsInReceiver,
-      poolStats.allocSizeForClass(victimClassId), receiverAllocSize,
-      poolStats.evictionAgeForClass(victimClassId), receiverEvictionAge,
-      poolStats.mpStats.acStats.at(victimClassId).freeAllocs);
+        victimClassId, receiverClassId, request_id, pid,
+        poolStats.numSlabsForClass(victimClassId), numSlabsInReceiver,
+        poolStats.allocSizeForClass(victimClassId), receiverAllocSize,
+        poolStats.evictionAgeForClass(victimClassId), receiverEvictionAge,
+        poolStats.mpStats.acStats.at(victimClassId).freeAllocs);
   XLOGF(DBG,
         "Moved slab in Pool Id: {}, Victim Class Id: {}, Receiver "
         "Class Id: {}",
@@ -115,13 +123,13 @@ RebalanceContext PoolRebalancer::pickVictimByFreeAlloc(PoolId pid) const {
   return ctx;
 }
 
-bool PoolRebalancer::tryRebalancing(PoolId pid, RebalanceStrategy& strategy) {
+bool PoolRebalancer::tryRebalancing(PoolId pid, RebalanceStrategy& strategy, uint64_t request_id) {
   const auto begin = util::getCurrentTimeMs();
 
   if (freeAllocThreshold_ > 0) {
     auto ctx = pickVictimByFreeAlloc(pid);
     if (ctx.victimClassId != Slab::kInvalidClassId) {
-      releaseSlab(pid, ctx.victimClassId, Slab::kInvalidClassId);
+      releaseSlab(pid, ctx.victimClassId, Slab::kInvalidClassId, request_id);
     }
   }
 
@@ -142,10 +150,16 @@ bool PoolRebalancer::tryRebalancing(PoolId pid, RebalanceStrategy& strategy) {
     return false;
   }
   currentTimeSec = util::getCurrentTimeMs();
-  releaseSlab(pid, context.victimClassId, context.receiverClassId);
+  releaseSlab(pid, context.victimClassId, context.receiverClassId, request_id);
   end = util::getCurrentTimeMs();
   releaseStats_.recordLoopTime(end > currentTimeSec ? end - currentTimeSec : 0);
   rebalanceStats_.recordLoopTime(end > begin ? end - begin : 0);
+
+  XLOGF(DBG, "rebalance_event: request_id: {}, pool_id: {}, victim_class_id: {}, receiver_class_id: {}",
+    request_id,
+    static_cast<int>(pid),
+    static_cast<int>(context.victimClassId),
+    static_cast<int>(context.receiverClassId));
 
   return true;
 }

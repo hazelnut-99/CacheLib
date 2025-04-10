@@ -371,7 +371,7 @@ class CacheStressor : public Stressor {
                         poolId, classId, getDeltaValue, missDeltaValue);
                   }
               }
-          cache_->wakeupPoolRebalancer();
+          cache_->wakeupPoolRebalancer(i);
         }
 
         OpType op = req.getOp();

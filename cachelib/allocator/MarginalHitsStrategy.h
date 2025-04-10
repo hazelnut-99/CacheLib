@@ -49,6 +49,8 @@ class MarginalHitsStrategy : public RebalanceStrategy {
 
     unsigned int tailSlabCnt{1};
 
+    bool decayWithHits{false};
+
     Config() noexcept {}
     explicit Config(double param) noexcept : Config(param, 1, 1) {}
     Config(double param, unsigned int minSlab, unsigned int maxFree) noexcept

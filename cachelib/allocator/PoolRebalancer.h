@@ -55,7 +55,7 @@ class PoolRebalancer : public PeriodicWorker {
 
   RebalancerStats getStats() const noexcept;
 
-  void publicWork();
+  void publicWork(uint64_t request_id = 0);
 
  private:
   struct LoopStats {
@@ -90,14 +90,14 @@ class PoolRebalancer : public PeriodicWorker {
   // @return true   A rebalance operation was applied successfully to the
   //                memory pool
   //         false  There was no need for rebalancing
-  bool tryRebalancing(PoolId pid, RebalanceStrategy& strategy);
+  bool tryRebalancing(PoolId pid, RebalanceStrategy& strategy, uint64_t request_id = 0);
 
   // Pick only the victim which has number of free allocs per number of
   // allocs per slab above the 'freeAllocThreshold_' ratio. If there are
   // multiple such slab classes, the slab class with highest ratio is picked
   RebalanceContext pickVictimByFreeAlloc(PoolId pid) const;
 
-  void releaseSlab(PoolId pid, ClassId victim, ClassId receiver);
+  void releaseSlab(PoolId pid, ClassId victim, ClassId receiver, uint64_t request_id = 0);
   // cache allocator's interface for rebalancing
   CacheBase& cache_;
 

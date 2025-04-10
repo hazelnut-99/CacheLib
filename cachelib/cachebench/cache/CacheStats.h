@@ -140,7 +140,7 @@ struct Stats {
   std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheGets;
   std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheMisses;
 
-  std::map<PoolId, std::vector<std::tuple<ClassId, ClassId>>> rebalanceEvents;
+  std::map<PoolId, std::vector<std::tuple<ClassId, ClassId, uint64_t>>> rebalanceEvents;
 
   // populate the counters related to nvm usage. Cache implementation can decide
   // what to populate since not all of those are interesting when running
@@ -208,8 +208,8 @@ struct Stats {
     folly::dynamic rebalanceEventsJson = folly::dynamic::array;
     for (const auto& [pid, events] : rebalanceEvents) {
       folly::dynamic eventArray = folly::dynamic::array;
-      for (const auto& [from, to] : events) {
-        eventArray.push_back(folly::dynamic::object("from", from)("to", to));
+      for (const auto& [from, to, request_id] : events) {
+        eventArray.push_back(folly::dynamic::object("from", from)("to", to)("request_id", request_id));
       }
       rebalanceEventsJson.push_back(folly::dynamic::object("pid", pid)("events", eventArray));
     }
@@ -320,8 +320,8 @@ struct Stats {
     // Print rebalance events
     for (const auto& [pid, events] : rebalanceEvents) {
       out << folly::sformat("Rebalancing events, Pool ID: {:2}", pid) << std::endl;
-      for (const auto& [from, to] : events) {
-          out << folly::sformat("  from: {:4} to: {:4}", from, to) << std::endl;
+      for (const auto& [from, to, request_id] : events) {
+          out << folly::sformat("request_id: {:12}  from: {:4} to: {:4}", request_id, from, to) << std::endl;
       }
     }
 

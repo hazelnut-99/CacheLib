@@ -88,7 +88,7 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
       classStates_[pid].smoothedRanks[cid] = 0;
     }
   }
-  classStates_[pid].updateRankings(scores, config.movingAverageParam);
+  classStates_[pid].updateRankings(scores, config.movingAverageParam, config.decayWithHits);
   RebalanceContext ctx = pickVictimAndReceiverFromRankings(pid, validVictim, validReceiver);
   if (ctx.victimClassId != Slab::kInvalidClassId 
       && ctx.receiverClassId != Slab::kInvalidClassId

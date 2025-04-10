@@ -329,9 +329,9 @@ class Cache {
   // return the stats for the pool.
   PoolStats getPoolStats(PoolId pid) const { return cache_->getPoolStats(pid); }
   
-  void wakeupPoolRebalancer() {
+  void wakeupPoolRebalancer(uint64_t request_id) {
     // synchronously
-    cache_->wakeupPoolRebalancer(true);
+    cache_->wakeupPoolRebalancer(true, request_id);
   }
   
   // return the total number of inconsistent operations detected since start.
@@ -1214,7 +1214,7 @@ Stats Cache<Allocator>::getStats() const {
     const auto& rebalancer_events = cache_->getAllSlabReleaseEvents(pid).rebalancerEvents;
     ret.rebalanceEvents[pid].clear();
     for (const auto& event : rebalancer_events) {
-      ret.rebalanceEvents[pid].emplace_back(event.from, event.to);
+      ret.rebalanceEvents[pid].emplace_back(event.from, event.to, event.durationMs);
     }
   }
 

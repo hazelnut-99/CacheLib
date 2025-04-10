@@ -107,7 +107,7 @@ struct CacheConfig : public JSONConfig {
   bool countColdTailHitsOnly{false};
   unsigned int tailSlabCnt{1};
   bool mhFilterReceiverByEvictionRate{false};
-
+  bool mhDecayWithHits{false};
   bool moveOnSlabRelease{false};
 
   uint64_t htBucketPower{22}; // buckets in hash table

@@ -34,9 +34,9 @@ struct MarginalHitsState {
 
   // sort rankings for current round and update smoothed rankings
   void updateRankings(const std::unordered_map<EntityId, double>& scores,
-                      double movingAverageParam) {
+                      double movingAverageParam, bool decayWithHits = false) {
     return updateRankingsImpl(
-        entities, scores, movingAverageParam, smoothedRanks);
+        entities, scores, movingAverageParam, smoothedRanks, decayWithHits);
   }
 
   // pick victim and receiver pools according to smoothed rankings
@@ -65,7 +65,8 @@ struct MarginalHitsState {
       std::vector<EntityId> entities,
       const std::unordered_map<EntityId, double>& scores,
       const double& movingAverageParam,
-      std::unordered_map<EntityId, double>& smoothedRanks);
+      std::unordered_map<EntityId, double>& smoothedRanks,
+      const bool decayWithHits = false);
 
   static std::pair<EntityId, EntityId> pickVictimAndReceiverFromRankingsImpl(
       const std::unordered_map<EntityId, double>& smoothedRanks,
@@ -94,10 +95,12 @@ void MarginalHitsState<EntityId>::updateRankingsImpl(
     std::vector<EntityId> entities,
     const std::unordered_map<EntityId, double>& scores,
     const double& movingAverageParam,
-    std::unordered_map<EntityId, double>& smoothedRanks) {
+    std::unordered_map<EntityId, double>& smoothedRanks,
+    const bool decayWithHits) {
+      
   sortEntitiesByScores(scores, entities);
   for (uint32_t i = 0; i < entities.size(); i++) {
-    updateMovingAverage(i, movingAverageParam, smoothedRanks[entities[i]]);
+    updateMovingAverage(decayWithHits ? scores.at(entities[i]) : i, movingAverageParam, smoothedRanks[entities[i]]);
   }
 }
 

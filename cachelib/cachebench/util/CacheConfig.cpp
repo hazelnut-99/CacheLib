@@ -59,6 +59,8 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, countColdTailHitsOnly);
   JSONSetVal(configJson, tailSlabCnt);
   JSONSetVal(configJson, mhFilterReceiverByEvictionRate);
+  JSONSetVal(configJson, mhDecayWithHits);
+
 
   JSONSetVal(configJson, htBucketPower);
   JSONSetVal(configJson, htLockPower);
@@ -194,6 +196,7 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     mhConfig.enableHoldOff = mhEnableHoldOff;
     mhConfig.minDiff = mhMinDiff;
     mhConfig.tailSlabCnt = tailSlabCnt;
+    mhConfig.decayWithHits = mhDecayWithHits;
     mhConfig.filterReceiverByEvictionRate = mhFilterReceiverByEvictionRate;
     return std::make_shared<MarginalHitsStrategy>(mhConfig);
   } else if (rebalanceStrategy == "free-mem") {
