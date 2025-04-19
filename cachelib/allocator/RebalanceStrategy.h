@@ -31,6 +31,12 @@ struct RebalanceContext {
   RebalanceContext() = default;
   RebalanceContext(ClassId victim, ClassId receiver)
       : victimClassId(victim), receiverClassId(receiver) {}
+  
+  bool isEffective() const {
+    return !(victimClassId == Slab::kInvalidClassId ||
+              receiverClassId == Slab::kInvalidClassId ||
+              victimClassId == receiverClassId);
+  }
 };
 
 // Base class for rebalance strategy.
@@ -78,6 +84,16 @@ class RebalanceStrategy {
   virtual void updateConfig(const BaseConfig&) {}
 
   Type getType() const { return type_; }
+
+  virtual void uponAllocFailure() {}
+
+  void recordRebalanceEvent(PoolId pid, RebalanceContext ctx);
+
+  unsigned int getRebalanceEventQueueSize(PoolId pid);
+
+  void clearPoolRebalanceEvent(PoolId pid);
+
+  bool checkForThrashing(PoolId pid);
 
  protected:
   using PoolState = std::array<detail::Info, MemoryAllocator::kMaxClasses>;
@@ -193,6 +209,9 @@ class RebalanceStrategy {
                                  T noOp);
 
   Type type_ = PickNothingOrTest;
+
+  std::unordered_map<PoolId, std::deque<std::pair<ClassId, ClassId>>> recentRebalanceEvents_;
+  static constexpr size_t kMaxQueueSize = 20;
 
   // maintain the state of the previous snapshot of pool for every pool.  We
   // ll use this for processing and getting the deltas for some of these.

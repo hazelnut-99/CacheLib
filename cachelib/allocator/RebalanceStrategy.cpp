@@ -287,6 +287,54 @@ ClassId RebalanceStrategy::pickReceiverWithAllocFailures(
                            });
 }
 
+void RebalanceStrategy::recordRebalanceEvent(PoolId pid, RebalanceContext ctx) {
+  if(ctx.isEffective()) {
+    auto& eventQueue = recentRebalanceEvents_[pid];
+    eventQueue.emplace_back(ctx.victimClassId, ctx.receiverClassId);
+    if (eventQueue.size() > kMaxQueueSize) {
+      eventQueue.pop_front();
+    }
+  }
+}
+
+unsigned int RebalanceStrategy::getRebalanceEventQueueSize(PoolId pid) {
+  auto& eventQueue = recentRebalanceEvents_[pid];
+  return eventQueue.size();
+}
+
+void RebalanceStrategy::clearPoolRebalanceEvent(PoolId pid) {
+  recentRebalanceEvents_.erase(pid);
+}
+
+bool RebalanceStrategy::checkForThrashing(PoolId pid) {
+  const auto it = recentRebalanceEvents_.find(pid);
+  if (it == recentRebalanceEvents_.end() || it->second.empty()) {
+      return false;
+  }
+
+  const auto& events = it->second;
+  std::unordered_map<ClassId, int> netChanges;
+  for (size_t window_size = 1; window_size <= events.size(); ++window_size) {
+
+      const auto& event = events[events.size() - window_size];
+      netChanges[event.first]--;
+      netChanges[event.second]++;
+
+      int absNetSum = 0;
+      for (const auto& [classId, net] : netChanges) {
+          absNetSum += std::abs(net);
+      }
+      int netEffectiveMoves = absNetSum / 2;
+      double rate = static_cast<double>(netEffectiveMoves) / window_size;
+
+      if (rate <= 0.5) {
+          return true; // Found a window that fails the threshold
+      }
+  }
+
+  return false; // All windows passed the threshold
+}
+
 template <typename T>
 T RebalanceStrategy::executeAndRecordCurrentState(
     const CacheBase& cache,

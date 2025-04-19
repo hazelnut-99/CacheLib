@@ -78,6 +78,8 @@ struct CacheConfig : public JSONConfig {
   unsigned int poolRebalancerFreeAllocThreshold{0};
   bool poolRebalancerDisableForcedWakeUp{false};
   uint64_t wakeUpRebalancerEveryXReqs{0};
+  bool useAdaptiveRebalanceInterval{false};
+  
   
   std::string rebalanceStrategy;
 
@@ -100,7 +102,7 @@ struct CacheConfig : public JSONConfig {
   unsigned int fmNumFreeSlabs{3};
   size_t fmMaxUnAllocatedSlabs{1000};
   // MarginalHitsStrategy
-  double mhMinDiff{1};
+  double mhMinDiff{0};
   double mhMovingAverageParam{0.3};
   unsigned int mhMaxFreeMemSlabs{1};
   bool mhEnableHoldOff{false};
@@ -109,6 +111,9 @@ struct CacheConfig : public JSONConfig {
   bool mhFilterReceiverByEvictionRate{false};
   bool mhDecayWithHits{false};
   bool moveOnSlabRelease{false};
+  
+  bool mhAutoDecThreshold{false};
+  bool mhAutoIncThreshold{false};
 
   uint64_t htBucketPower{22}; // buckets in hash table
   uint64_t htLockPower{20};   // locks in hash table

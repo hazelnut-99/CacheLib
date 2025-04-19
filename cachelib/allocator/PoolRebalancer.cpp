@@ -43,11 +43,20 @@ void PoolRebalancer::work() {
       if (!strategy) {
         strategy = defaultStrategy_;
       }
+      // to do make sure each pool has its own strategy object
       tryRebalancing(pid, *strategy);
     }
   } catch (const std::exception& ex) {
     XLOGF(ERR, "Rebalancing interrupted due to exception: {}", ex.what());
   }
+}
+
+void PoolRebalancer::processAllocFailure(PoolId pid) {
+  auto strategy = cache_.getRebalanceStrategy(pid);
+  if (!strategy) {
+    strategy = defaultStrategy_;
+  }
+  strategy->uponAllocFailure();
 }
 
 void PoolRebalancer::publicWork(uint64_t request_id) {
@@ -139,6 +148,8 @@ bool PoolRebalancer::tryRebalancing(PoolId pid, RebalanceStrategy& strategy, uin
 
   auto currentTimeSec = util::getCurrentTimeMs();
   const auto context = strategy.pickVictimAndReceiver(cache_, pid);
+  // add to the queue
+  strategy.recordRebalanceEvent(pid, context);
   auto end = util::getCurrentTimeMs();
   pickVictimStats_.recordLoopTime(end > currentTimeSec ? end - currentTimeSec
                                                        : 0);
@@ -160,8 +171,58 @@ bool PoolRebalancer::tryRebalancing(PoolId pid, RebalanceStrategy& strategy, uin
     static_cast<int>(pid),
     static_cast<int>(context.victimClassId),
     static_cast<int>(context.receiverClassId));
+  addToPoolEventMap(pid, context.victimClassId,
+                    context.receiverClassId);
 
   return true;
+}
+
+void PoolRebalancer::addToPoolEventMap(PoolId pid, ClassId victimClassId, ClassId receiverClassId) {
+  auto& eventQueue = poolEventMap_[pid];
+  eventQueue.emplace_back(victimClassId, receiverClassId);
+
+  // Enforce the fixed size
+  if (eventQueue.size() > kMaxQueueSize) {
+    eventQueue.pop_front();
+  }
+}
+
+unsigned int PoolRebalancer::getRebalanceEventQueueSize(PoolId pid) {
+  auto& eventQueue = poolEventMap_[pid];
+  return eventQueue.size();
+}
+
+void PoolRebalancer::clearPoolEventMap(PoolId pid) {
+  poolEventMap_.erase(pid);
+}
+
+bool PoolRebalancer::checkForThrashing(PoolId pid) {
+  const auto it = poolEventMap_.find(pid);
+  if (it == poolEventMap_.end() || it->second.empty()) {
+      return false;
+  }
+
+  const auto& events = it->second;
+  std::unordered_map<ClassId, int> netChanges;
+  for (size_t window_size = 1; window_size <= events.size(); ++window_size) {
+
+      const auto& event = events[events.size() - window_size];
+      netChanges[event.first]--;
+      netChanges[event.second]++;
+
+      int absNetSum = 0;
+      for (const auto& [classId, net] : netChanges) {
+          absNetSum += std::abs(net);
+      }
+      int netEffectiveMoves = absNetSum / 2;
+      double rate = static_cast<double>(netEffectiveMoves) / window_size;
+
+      if (rate <= 0.5) {
+          return true; // Found a window that fails the threshold
+      }
+  }
+
+  return false; // All windows passed the threshold
 }
 
 RebalancerStats PoolRebalancer::getStats() const noexcept {

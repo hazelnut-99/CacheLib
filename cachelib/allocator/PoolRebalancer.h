@@ -23,6 +23,10 @@
 #include "cachelib/allocator/RebalanceStrategy.h"
 #include "cachelib/allocator/SlabReleaseStats.h"
 #include "cachelib/common/PeriodicWorker.h"
+#include <unordered_map>
+#include <deque>
+#include <utility> // For std::pair
+#include <cmath>   // For std::abs
 
 namespace facebook {
 namespace cachelib {
@@ -56,6 +60,17 @@ class PoolRebalancer : public PeriodicWorker {
   RebalancerStats getStats() const noexcept;
 
   void publicWork(uint64_t request_id = 0);
+
+  // Clear the deque for a specific pool.
+  void clearPoolEventMap(PoolId pid);
+
+  // Calculate the effective movement rate for a specific pool.
+  // The rate is calculated as netEffectiveMoves / queue size.
+  bool checkForThrashing(PoolId pid);
+
+  unsigned int getRebalanceEventQueueSize(PoolId pid);
+
+  void processAllocFailure(PoolId pid);
 
  private:
   struct LoopStats {
@@ -98,6 +113,12 @@ class PoolRebalancer : public PeriodicWorker {
   RebalanceContext pickVictimByFreeAlloc(PoolId pid) const;
 
   void releaseSlab(PoolId pid, ClassId victim, ClassId receiver, uint64_t request_id = 0);
+
+  // Add a victim and receiver pair to the deque for a specific pool.
+  // Ensures the deque size does not exceed the maximum size.
+  void addToPoolEventMap(PoolId pid, ClassId victimClassId, ClassId receiverClassId);
+
+
   // cache allocator's interface for rebalancing
   CacheBase& cache_;
 
@@ -108,6 +129,8 @@ class PoolRebalancer : public PeriodicWorker {
   // of free allocs to number of allocs per slab.
   unsigned int freeAllocThreshold_;
 
+  unsigned int recentRebalanceEventsSize_;
+
   // slab release stats for this rebalancer.
   ReleaseStats stats_;
 
@@ -115,6 +138,9 @@ class PoolRebalancer : public PeriodicWorker {
   LoopStats rebalanceStats_;
   LoopStats releaseStats_;
   LoopStats pickVictimStats_;
+
+  std::unordered_map<PoolId, std::deque<std::pair<ClassId, ClassId>>> poolEventMap_;
+  static constexpr size_t kMaxQueueSize = 20;
 
   // implements the actual logic of running tryRebalancing and
   // updating the stats

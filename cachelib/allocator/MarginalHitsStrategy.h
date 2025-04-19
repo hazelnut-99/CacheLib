@@ -51,6 +51,10 @@ class MarginalHitsStrategy : public RebalanceStrategy {
 
     bool decayWithHits{false};
 
+    bool autoIncThreshold{false};
+
+    bool autoDecThreshold{false};
+
     Config() noexcept {}
     explicit Config(double param) noexcept : Config(param, 1, 1) {}
     Config(double param, unsigned int minSlab, unsigned int maxFree) noexcept
@@ -65,6 +69,19 @@ class MarginalHitsStrategy : public RebalanceStrategy {
     std::lock_guard<std::mutex> l(configLock_);
     config_ = static_cast<const Config&>(baseConfig);
   }
+
+  void uponAllocFailure() override {
+    auto config = getConfigCopy();
+    if(config.autoDecThreshold) {
+      XLOGF(INFO, "Alloc failure, resetting threshold for marginal-hits to 0");
+      minDiffInUse_ = 0;
+    }
+  }
+
+  // Doubles the rebalance threshold (minDiff). If minDiff is 0, set it to 1.
+  void doubleRebalanceThreshold();
+
+  void decreaseRebalanceThreshold();
 
   explicit MarginalHitsStrategy(Config config = {});
 
@@ -99,6 +116,7 @@ class MarginalHitsStrategy : public RebalanceStrategy {
       const std::unordered_map<ClassId, bool>& validVictim,
       const std::unordered_map<ClassId, bool>& validReceiver);
 
+
   // marginal hits states for classes in each pools
   std::unordered_map<PoolId, MarginalHitsState<ClassId>> classStates_;
 
@@ -107,6 +125,7 @@ class MarginalHitsStrategy : public RebalanceStrategy {
   // obtain a copy first
   Config config_;
   mutable std::mutex configLock_;
+  unsigned int minDiffInUse_{0};
 };
 } // namespace cachelib
 } // namespace facebook

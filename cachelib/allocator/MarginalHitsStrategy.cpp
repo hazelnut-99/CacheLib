@@ -28,7 +28,7 @@
 namespace facebook::cachelib {
 
 MarginalHitsStrategy::MarginalHitsStrategy(Config config)
-    : RebalanceStrategy(MarginalHits), config_(std::move(config)) {}
+    : RebalanceStrategy(MarginalHits), config_(std::move(config)), minDiffInUse_(config.minDiff) {}
 
 RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     const CacheBase& cache, PoolId pid, const PoolStats& poolStats) {
@@ -40,6 +40,21 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
           static_cast<int>(pid));
     return kNoOpContext;
   }
+
+  if(config.autoIncThreshold || config.autoDecThreshold) { 
+    bool thrashingDetected = checkForThrashing(pid);
+    auto eventQueueSize = getRebalanceEventQueueSize(pid);
+    if (thrashingDetected && config.autoIncThreshold) {
+      doubleRebalanceThreshold();
+      clearPoolRebalanceEvent(pid);
+    } else if (!thrashingDetected && config.autoDecThreshold && eventQueueSize > 2) {
+        // not including 1 because 1 is always 100% effective
+        decreaseRebalanceThreshold();
+    }
+  }
+
+  XLOGF(DBG, "rebalance_threshold: {}" , minDiffInUse_);
+
   auto scores = computeClassMarginalHits(pid, poolStats, config.tailSlabCnt);
   auto classesSet = poolStats.getClassIds();
   std::vector<ClassId> classes(classesSet.begin(), classesSet.end());
@@ -60,8 +75,22 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     validReceiver[it] = (acStats.at(it).getTotalFreeMemory() <
                         config.maxFreeMemSlabs * Slab::kSize) && 
                         (!config.filterReceiverByEvictionRate || poolState.at(it).getDeltaEvictions(poolStats) > 0);
+  }
 
-    // for debugging purposes
+  if (classStates_[pid].entities.empty()) {
+    // initialization
+    classStates_[pid].entities = classes;
+    for (auto cid : classes) {
+      classStates_[pid].smoothedRanks[cid] = 0;
+    }
+  }
+  classStates_[pid].updateRankings(scores, config.movingAverageParam, config.decayWithHits);
+  RebalanceContext ctx = pickVictimAndReceiverFromRankings(pid, validVictim, validReceiver);
+  
+  // classStates_[pid].smoothedRanks[ctx.victimClassId]
+  folly::dynamic logArray = folly::dynamic::array;
+  for (auto it : classes) {
+    auto acStats = poolStats.mpStats.acStats;
     folly::dynamic logData = folly::dynamic::object
     ("pool_id", static_cast<int>(pid))
     ("class_id", static_cast<int>(it))
@@ -76,26 +105,30 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     ("delta_hot_hits", poolState.at(it).getHotHits(poolStats))
     ("delta_total_hits", poolState.at(it).getColdHits(poolStats) + poolState.at(it).getWarmHits(poolStats) + poolState.at(it).getHotHits(poolStats))
     ("class_oldest_element_age", poolEvictionAgeStats.getOldestElementAge(it))
-    ("pool_all_slabs_allocated", cache.getPool(pid).allSlabsAllocated());
+    ("hot_queue_oldest_element_age", poolEvictionAgeStats.getHotEvictionStat(it).oldestElementAge)
+    ("pool_all_slabs_allocated", cache.getPool(pid).allSlabsAllocated())
+    ("smoothed_rank", classStates_[pid].smoothedRanks[it]);
 
     std::string jsonString = folly::toJson(logData);
     XLOGF(DBG, "Rebalance_states_logging: {}", jsonString);
+
+    logArray.push_back(logData);
   }
-  if (classStates_[pid].entities.empty()) {
-    // initialization
-    classStates_[pid].entities = classes;
-    for (auto cid : classes) {
-      classStates_[pid].smoothedRanks[cid] = 0;
-    }
+  std::string jsonString = folly::toJson(logArray);
+  XLOGF(DBG, "Rebalance_class_snapshot: {}", jsonString);
+
+
+  if(!ctx.isEffective()) {
+    ctx = kNoOpContext;
+  } else if(minDiffInUse_ > 0 && (scores.at(ctx.receiverClassId) - scores.at(ctx.victimClassId)) < minDiffInUse_){
+    XLOGF(DBG, "Not enough to trigger rebalancing, receiver score: {}, victim score: {}, threshold: {}",
+          scores.at(ctx.receiverClassId), scores.at(ctx.victimClassId), minDiffInUse_);
+    ctx = kNoOpContext;
   }
-  classStates_[pid].updateRankings(scores, config.movingAverageParam, config.decayWithHits);
-  RebalanceContext ctx = pickVictimAndReceiverFromRankings(pid, validVictim, validReceiver);
-  if (ctx.victimClassId != Slab::kInvalidClassId 
-      && ctx.receiverClassId != Slab::kInvalidClassId
-      && ctx.victimClassId != ctx.receiverClassId) {
-    if((scores.at(ctx.receiverClassId) - scores.at(ctx.victimClassId)) < config.minDiff){
-      XLOG(DBG, " Not enough to trigger slab rebalancing");
-    }
+
+  if (ctx.isEffective()) {
+    XLOGF(DBG, "marginal-hits diff between receiver and victim: {}, receiver_id: {}, victim_id: {}",
+          (scores.at(ctx.receiverClassId) - scores.at(ctx.victimClassId)), ctx.receiverClassId, ctx.victimClassId);
   }
 
   for (const auto i : poolStats.getClassIds()) {
@@ -147,4 +180,21 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverFromRankings(
         classStates_[pid].smoothedRanks[ctx.victimClassId]);
   return ctx;
 }
+
+void MarginalHitsStrategy::doubleRebalanceThreshold() {
+  auto newValue = std::max(minDiffInUse_ * 2, static_cast<unsigned int>(1));
+  XLOGF(INFO, "double rebalance threshold: before: {}, after: {}", minDiffInUse_, newValue);  
+  minDiffInUse_ = newValue;
+}
+
+void MarginalHitsStrategy::decreaseRebalanceThreshold() {
+  auto newValue = std::max(minDiffInUse_ - 1, static_cast<unsigned int>(1));
+  if (newValue == minDiffInUse_) {
+    return;
+  }
+  XLOGF(INFO, "decrease rebalance threshold: before: {}, after: {}", minDiffInUse_, newValue);  
+  minDiffInUse_ = newValue;
+}
+
+
 } // namespace facebook::cachelib

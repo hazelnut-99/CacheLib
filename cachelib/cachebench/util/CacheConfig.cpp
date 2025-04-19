@@ -35,6 +35,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, poolRebalancerFreeAllocThreshold);
   JSONSetVal(configJson, poolRebalancerDisableForcedWakeUp);
   JSONSetVal(configJson, wakeUpRebalancerEveryXReqs);
+  JSONSetVal(configJson, useAdaptiveRebalanceInterval);
   JSONSetVal(configJson, moveOnSlabRelease);
   JSONSetVal(configJson, rebalanceStrategy);
   JSONSetVal(configJson, rebalanceMinSlabs);
@@ -60,6 +61,8 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, tailSlabCnt);
   JSONSetVal(configJson, mhFilterReceiverByEvictionRate);
   JSONSetVal(configJson, mhDecayWithHits);
+  JSONSetVal(configJson, mhAutoDecThreshold);
+  JSONSetVal(configJson, mhAutoIncThreshold);
 
 
   JSONSetVal(configJson, htBucketPower);
@@ -144,7 +147,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   // if you added new fields to the configuration, update the JSONSetVal
   // to make them available for the json configs and increment the size
   // below
-  checkCorrectSize<CacheConfig, 840>();
+  checkCorrectSize<CacheConfig, 856>();
 
   if (numPools != poolSizes.size()) {
     throw std::invalid_argument(folly::sformat(
@@ -198,6 +201,8 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     mhConfig.tailSlabCnt = tailSlabCnt;
     mhConfig.decayWithHits = mhDecayWithHits;
     mhConfig.filterReceiverByEvictionRate = mhFilterReceiverByEvictionRate;
+    mhConfig.autoIncThreshold = mhAutoIncThreshold;
+    mhConfig.autoDecThreshold = mhAutoDecThreshold;
     return std::make_shared<MarginalHitsStrategy>(mhConfig);
   } else if (rebalanceStrategy == "free-mem") {
     FreeMemStrategy::Config fmConfig;

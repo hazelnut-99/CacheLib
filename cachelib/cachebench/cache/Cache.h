@@ -333,6 +333,19 @@ class Cache {
     // synchronously
     cache_->wakeupPoolRebalancer(true, request_id);
   }
+
+
+  void clearRebalancerPoolEventMap(PoolId pid){
+    cache_->clearRebalancerPoolEventMap(pid);
+  }
+
+  bool checkForRebalanceThrashing(PoolId pid){
+    return cache_->checkForRebalanceThrashing(pid);
+  }
+
+  unsigned int getRebalancerPoolEventCount(PoolId pid){
+    return cache_->getRebalancerPoolEventCount(pid);
+  }
   
   // return the total number of inconsistent operations detected since start.
   unsigned int getInconsistencyCount() const {

@@ -391,6 +391,10 @@ class CacheAllocator : public CacheBase {
   // New method to wake up the pool rebalancer
   void wakeupPoolRebalancer(bool synchronous = false, uint64_t request_id = 0);
 
+  void clearRebalancerPoolEventMap(PoolId pid);
+  bool checkForRebalanceThrashing(PoolId pid);
+  unsigned int getRebalancerPoolEventCount(PoolId pid);
+
   // create a new cache allocation. The allocation can be initialized
   // appropriately and made accessible through insert or insertOrReplace.
   // If the handle returned from this api is not passed on to
@@ -2710,6 +2714,9 @@ CacheAllocator<CacheTrait>::allocateInternal(PoolId pid,
 
   } else { // failed to allocate memory.
     (*stats_.allocFailures)[pid][cid].inc();
+    if(poolRebalancer_) {
+      poolRebalancer_->processAllocFailure(pid);
+    }
     // wake up rebalancer
     if (!config_.poolRebalancerDisableForcedWakeUp && poolRebalancer_) {
       poolRebalancer_->wakeUp();
@@ -4515,6 +4522,21 @@ void CacheAllocator<CacheTrait>::wakeupPoolRebalancer(bool synchronous,
   } else {
     XLOG(DBG, "poolRebalancer_ is null");
   }
+}
+
+template <typename CacheTrait>
+void CacheAllocator<CacheTrait>::clearRebalancerPoolEventMap(PoolId pid){
+  poolRebalancer_->clearPoolEventMap(pid);
+}
+
+template <typename CacheTrait>
+bool CacheAllocator<CacheTrait>::checkForRebalanceThrashing(PoolId pid){
+  return poolRebalancer_->checkForThrashing(pid);
+}
+
+template <typename CacheTrait>
+unsigned int CacheAllocator<CacheTrait>::getRebalancerPoolEventCount(PoolId pid){
+  return poolRebalancer_->getRebalanceEventQueueSize(pid);
 }
 
 template <typename CacheTrait>

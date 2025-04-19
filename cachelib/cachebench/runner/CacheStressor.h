@@ -97,6 +97,7 @@ class CacheStressor : public Stressor {
     }
 
     wakeUpRebalancerEveryXReqs_ = cacheConfig.wakeUpRebalancerEveryXReqs;
+    useAdaptiveRebalanceInterval_ = cacheConfig.useAdaptiveRebalanceInterval;
     
     // try disable all async wake-ups
     if (wakeUpRebalancerEveryXReqs_ > 0) {
@@ -372,6 +373,18 @@ class CacheStressor : public Stressor {
                   }
               }
           cache_->wakeupPoolRebalancer(i);
+          
+          if (useAdaptiveRebalanceInterval_) {
+            bool thrashingDected = cache_->checkForRebalanceThrashing(pid);
+            auto rebalanceEventCount = cache_->getRebalancerPoolEventCount(pid);
+            if (thrashingDected) {
+              XLOGF(INFO, "Effective movement rate is low, increasing "
+                        "the rebalance interval, from {} : {}", wakeUpRebalancerEveryXReqs_, wakeUpRebalancerEveryXReqs_ * 2);
+              wakeUpRebalancerEveryXReqs_ *= 2;
+              cache_->clearRebalancerPoolEventMap(pid);
+            }
+          }
+
         }
 
         OpType op = req.getOp();
@@ -657,6 +670,8 @@ class CacheStressor : public Stressor {
   set_mock_time_t setMockTimeFunc_;
 
   uint64_t wakeUpRebalancerEveryXReqs_;
+
+  bool useAdaptiveRebalanceInterval_;
 };
 } // namespace cachebench
 } // namespace cachelib
