@@ -820,12 +820,22 @@ cachelib::EvictionAgeStat MM2Q::Container<T, HookPtr>::getEvictionAgeStatLocked(
       getProjectedAge(LruType::HotTail, stat.hotQueueStat.oldestElementAge);
 
   // sum the tail and the main list for the ones that have tail.
+  // stat.warmQueueStat.oldestElementAge =
+  //     getOldestAgeLocked(LruType::WarmTail, currTime);
+  // stat.warmQueueStat.size = lru_.getList(LruType::Warm).size() +
+  //                           lru_.getList(LruType::WarmTail).size();
+  // stat.warmQueueStat.projectedAge =
+  //     getProjectedAge(LruType::WarmTail, stat.warmQueueStat.oldestElementAge);
+
+  // temporary workarounds, since lru_tail_age depends on warm queue stat
+  // todo: change back 
   stat.warmQueueStat.oldestElementAge =
-      getOldestAgeLocked(LruType::WarmTail, currTime);
-  stat.warmQueueStat.size = lru_.getList(LruType::Warm).size() +
-                            lru_.getList(LruType::WarmTail).size();
+      getOldestAgeLocked(LruType::HotTail, currTime);
+  stat.warmQueueStat.size = lru_.getList(LruType::Hot).size() +
+                          lru_.getList(LruType::HotTail).size();
   stat.warmQueueStat.projectedAge =
-      getProjectedAge(LruType::WarmTail, stat.warmQueueStat.oldestElementAge);
+    getProjectedAge(LruType::HotTail, stat.warmQueueStat.oldestElementAge);
+
 
   stat.coldQueueStat.oldestElementAge =
       getOldestAgeLocked(LruType::ColdTail, currTime);

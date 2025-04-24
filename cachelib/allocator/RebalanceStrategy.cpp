@@ -314,25 +314,20 @@ bool RebalanceStrategy::checkForThrashing(PoolId pid) {
 
   const auto& events = it->second;
   std::unordered_map<ClassId, int> netChanges;
-  for (size_t window_size = 1; window_size <= events.size(); ++window_size) {
 
-      const auto& event = events[events.size() - window_size];
-      netChanges[event.first]--;
-      netChanges[event.second]++;
-
-      int absNetSum = 0;
-      for (const auto& [classId, net] : netChanges) {
-          absNetSum += std::abs(net);
-      }
-      int netEffectiveMoves = absNetSum / 2;
-      double rate = static_cast<double>(netEffectiveMoves) / window_size;
-
-      if (rate <= 0.5) {
-          return true; // Found a window that fails the threshold
-      }
+  for (const auto& [fromClass, toClass] : events) {
+      netChanges[fromClass]--;
+      netChanges[toClass]++;
   }
 
-  return false; // All windows passed the threshold
+  int currentAbsNet = 0;
+  for (const auto& [classId, net] : netChanges) {
+      currentAbsNet += std::abs(net);
+  }
+  int totalEffectiveMoves = currentAbsNet / 2;
+
+  double overallRate = static_cast<double>(totalEffectiveMoves) / events.size();
+  return overallRate <= 0.5 && events.size() > 4;  
 }
 
 template <typename T>

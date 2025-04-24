@@ -21,6 +21,7 @@
 #include <iostream>
 #include <unordered_map>
 #include <vector>
+#include <limits>
 #include <folly/logging/xlog.h>
 namespace facebook::cachelib {
 // Data structure that ranks the entities according to marginal hits.
@@ -113,7 +114,8 @@ MarginalHitsState<EntityId>::pickVictimAndReceiverFromRankingsImpl(
     EntityId kInvalidEntityId) {
   EntityId victimId = kInvalidEntityId;
   EntityId receiverId = kInvalidEntityId;
-  double minRank = smoothedRanks.size();
+  //double minRank = smoothedRanks.size();
+  double minRank = std::numeric_limits<double>::max();
   double maxRank = -1;
   for (auto it : smoothedRanks) {
     XLOGF(DBG, "Picking Entity Id: {}, Smoothed Rank: {}, valid receiver: {}", it.first, it.second, validReceiver.at(it.first));

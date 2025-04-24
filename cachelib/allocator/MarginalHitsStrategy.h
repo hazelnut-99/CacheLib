@@ -43,13 +43,17 @@ class MarginalHitsStrategy : public RebalanceStrategy {
     bool enableHoldOff{false};
 
     // Absolute difference to be rebalanced
-    unsigned int minDiff{1};
+    unsigned int minDiff{0};
+
+    unsigned int minDiffRatio{0};
 
     bool filterReceiverByEvictionRate{false};
 
     unsigned int tailSlabCnt{1};
 
     bool decayWithHits{false};
+
+    bool onlyUpdateHitsIfRebalance{false};
 
     bool autoIncThreshold{false};
 

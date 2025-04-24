@@ -36,6 +36,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, poolRebalancerDisableForcedWakeUp);
   JSONSetVal(configJson, wakeUpRebalancerEveryXReqs);
   JSONSetVal(configJson, useAdaptiveRebalanceInterval);
+  JSONSetVal(configJson, useAdaptiveRebalanceIntervalV2);
   JSONSetVal(configJson, moveOnSlabRelease);
   JSONSetVal(configJson, rebalanceStrategy);
   JSONSetVal(configJson, rebalanceMinSlabs);
@@ -57,10 +58,12 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, mhMaxFreeMemSlabs);
   JSONSetVal(configJson, mhEnableHoldOff);
   JSONSetVal(configJson, mhMinDiff);
+  JSONSetVal(configJson, mhMinDiffRatio);
   JSONSetVal(configJson, countColdTailHitsOnly);
   JSONSetVal(configJson, tailSlabCnt);
   JSONSetVal(configJson, mhFilterReceiverByEvictionRate);
   JSONSetVal(configJson, mhDecayWithHits);
+  JSONSetVal(configJson, mhOnlyUpdateHitsIfRebalance);
   JSONSetVal(configJson, mhAutoDecThreshold);
   JSONSetVal(configJson, mhAutoIncThreshold);
 
@@ -147,7 +150,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   // if you added new fields to the configuration, update the JSONSetVal
   // to make them available for the json configs and increment the size
   // below
-  checkCorrectSize<CacheConfig, 856>();
+  checkCorrectSize<CacheConfig, 864>();
 
   if (numPools != poolSizes.size()) {
     throw std::invalid_argument(folly::sformat(
@@ -198,11 +201,13 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     mhConfig.maxFreeMemSlabs = mhMaxFreeMemSlabs;
     mhConfig.enableHoldOff = mhEnableHoldOff;
     mhConfig.minDiff = mhMinDiff;
+    mhConfig.minDiffRatio = mhMinDiffRatio;
     mhConfig.tailSlabCnt = tailSlabCnt;
     mhConfig.decayWithHits = mhDecayWithHits;
     mhConfig.filterReceiverByEvictionRate = mhFilterReceiverByEvictionRate;
     mhConfig.autoIncThreshold = mhAutoIncThreshold;
     mhConfig.autoDecThreshold = mhAutoDecThreshold;
+    mhConfig.onlyUpdateHitsIfRebalance = mhOnlyUpdateHitsIfRebalance;
     return std::make_shared<MarginalHitsStrategy>(mhConfig);
   } else if (rebalanceStrategy == "free-mem") {
     FreeMemStrategy::Config fmConfig;

@@ -22,6 +22,7 @@
 #include <functional>
 #include <folly/json.h>
 #include <folly/dynamic.h>
+#include <cmath>
 
 #include "cachelib/allocator/Util.h"
 
@@ -120,10 +121,13 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
 
   if(!ctx.isEffective()) {
     ctx = kNoOpContext;
-  } else if(minDiffInUse_ > 0 && (scores.at(ctx.receiverClassId) - scores.at(ctx.victimClassId)) < minDiffInUse_){
-    XLOGF(DBG, "Not enough to trigger rebalancing, receiver score: {}, victim score: {}, threshold: {}",
-          scores.at(ctx.receiverClassId), scores.at(ctx.victimClassId), minDiffInUse_);
-    ctx = kNoOpContext;
+  } else {
+    auto improvement = classStates_[pid].smoothedRanks.at(ctx.receiverClassId) - classStates_[pid].smoothedRanks.at(ctx.victimClassId);
+    if(minDiffInUse_ > 0 && improvement < minDiffInUse_) {
+      XLOGF(DBG, "Not enough to trigger rebalancing, receiver score: {}, victim score: {}, threshold: {}",
+        classStates_[pid].smoothedRanks.at(ctx.receiverClassId), classStates_[pid].smoothedRanks.at(ctx.victimClassId), minDiffInUse_);
+      ctx = kNoOpContext;
+    }
   }
 
   if (ctx.isEffective()) {
@@ -131,9 +135,11 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
           (scores.at(ctx.receiverClassId) - scores.at(ctx.victimClassId)), ctx.receiverClassId, ctx.victimClassId);
   }
 
-  for (const auto i : poolStats.getClassIds()) {
-    poolState[i].updateTailHits(poolStats);
-  }
+  if(!config.onlyUpdateHitsIfRebalance || ctx.isEffective()) {
+    for (const auto i : poolStats.getClassIds()) {
+      poolState[i].updateTailHits(poolStats);
+    }
+  } 
 
   return ctx;
 }
