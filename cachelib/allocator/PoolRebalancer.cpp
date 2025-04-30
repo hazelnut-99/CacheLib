@@ -149,7 +149,7 @@ bool PoolRebalancer::tryRebalancing(PoolId pid, RebalanceStrategy& strategy, uin
   auto currentTimeSec = util::getCurrentTimeMs();
   const auto context = strategy.pickVictimAndReceiver(cache_, pid);
   // add to the queue
-  strategy.recordRebalanceEvent(pid, context);
+  //strategy.recordRebalanceEvent(pid, context);
   auto end = util::getCurrentTimeMs();
   pickVictimStats_.recordLoopTime(end > currentTimeSec ? end - currentTimeSec
                                                        : 0);

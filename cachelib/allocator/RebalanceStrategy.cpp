@@ -290,16 +290,19 @@ ClassId RebalanceStrategy::pickReceiverWithAllocFailures(
 void RebalanceStrategy::recordRebalanceEvent(PoolId pid, RebalanceContext ctx) {
   if(ctx.isEffective()) {
     auto& eventQueue = recentRebalanceEvents_[pid];
-    eventQueue.emplace_back(ctx.victimClassId, ctx.receiverClassId);
+    eventQueue.emplace_back(ctx);
     if (eventQueue.size() > kMaxQueueSize) {
       eventQueue.pop_front();
     }
   }
 }
 
-unsigned int RebalanceStrategy::getRebalanceEventQueueSize(PoolId pid) {
-  auto& eventQueue = recentRebalanceEvents_[pid];
-  return eventQueue.size();
+unsigned int RebalanceStrategy::getRebalanceEventQueueSize(PoolId pid) const {
+  const auto it = recentRebalanceEvents_.find(pid);
+  if (it == recentRebalanceEvents_.end()) {
+    return 0;
+  }
+  return it->second.size();
 }
 
 void RebalanceStrategy::clearPoolRebalanceEvent(PoolId pid) {
@@ -315,9 +318,9 @@ bool RebalanceStrategy::checkForThrashing(PoolId pid) {
   const auto& events = it->second;
   std::unordered_map<ClassId, int> netChanges;
 
-  for (const auto& [fromClass, toClass] : events) {
-      netChanges[fromClass]--;
-      netChanges[toClass]++;
+  for (const auto& ctx : events) {
+      netChanges[ctx.victimClassId]--;
+      netChanges[ctx.receiverClassId]++;
   }
 
   int currentAbsNet = 0;
@@ -327,7 +330,25 @@ bool RebalanceStrategy::checkForThrashing(PoolId pid) {
   int totalEffectiveMoves = currentAbsNet / 2;
 
   double overallRate = static_cast<double>(totalEffectiveMoves) / events.size();
+  // todo make these criterion configurable
   return overallRate <= 0.5 && events.size() > 4;  
+}
+
+double RebalanceStrategy::getMinDiffValueFromRebalanceEvents(PoolId pid) const {
+  const auto it = recentRebalanceEvents_.find(pid);
+  if (it == recentRebalanceEvents_.end() || it->second.empty()) {
+    return 0.0; // Return 0.0 if the queue is empty or the pool ID is not found
+  }
+
+  const auto& events = it->second;
+
+  // Find the minimum diffValue in the queue
+  double minDiffValue = std::numeric_limits<double>::max();
+  for (const auto& ctx : events) {
+    minDiffValue = std::min(minDiffValue, ctx.diffValue);
+  }
+
+  return minDiffValue;
 }
 
 template <typename T>

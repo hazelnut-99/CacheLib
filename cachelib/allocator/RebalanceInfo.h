@@ -41,6 +41,10 @@ struct Info {
   // number of attempts remaining for hold off period when we acquire a slab.
   unsigned int holdOffRemaining{0};
 
+  unsigned int receiverHoldOffRemaining{0};
+
+  unsigned int victimHoldOffRemaining{0};
+
   // number of hits for this allocation class in this pool
   uint64_t hits{0};
 
@@ -175,6 +179,22 @@ struct Info {
   // returns true if the hold off is active for this alloc class.
   bool isOnHoldOff() const noexcept { return holdOffRemaining > 0; }
 
+  bool decrementReceiverHoldOff() noexcept {
+    if (receiverHoldOffRemaining > 0) {
+      --receiverHoldOffRemaining;
+      return true; // Hold-off was active and decremented
+    }
+    return false; // Hold-off was already finished
+  }
+
+  bool decrementVictimHoldOff() noexcept {
+    if (victimHoldOffRemaining > 0) {
+      --victimHoldOffRemaining;
+      return true; // Hold-off was active and decremented
+    }
+    return false; // Hold-off was already finished
+  }
+
   // reduces the hold off by one.
   void reduceHoldOff() noexcept {
     XDCHECK(isOnHoldOff());
@@ -185,6 +205,10 @@ struct Info {
 
   // initializes the hold off.
   void startHoldOff() noexcept { holdOffRemaining = kNumHoldOffRounds; }
+
+  void startVictimHoldOff() noexcept { victimHoldOffRemaining = kNumHoldOffRounds; }
+  
+  void startReceiverHoldOff() noexcept { receiverHoldOffRemaining = kNumHoldOffRounds; }
 
   void updateHits(const PoolStats& poolStats) noexcept {
     hits = poolStats.numHitsForClass(id);

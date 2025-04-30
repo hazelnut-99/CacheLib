@@ -28,6 +28,9 @@ struct RebalanceContext {
   ClassId victimClassId{Slab::kInvalidClassId};
   ClassId receiverClassId{Slab::kInvalidClassId};
 
+  double diffValue{0.0};
+
+
   RebalanceContext() = default;
   RebalanceContext(ClassId victim, ClassId receiver)
       : victimClassId(victim), receiverClassId(receiver) {}
@@ -89,7 +92,9 @@ class RebalanceStrategy {
 
   void recordRebalanceEvent(PoolId pid, RebalanceContext ctx);
 
-  unsigned int getRebalanceEventQueueSize(PoolId pid);
+  double getMinDiffValueFromRebalanceEvents(PoolId pid) const;
+
+  unsigned int getRebalanceEventQueueSize(PoolId pid) const;
 
   void clearPoolRebalanceEvent(PoolId pid);
 
@@ -210,7 +215,7 @@ class RebalanceStrategy {
 
   Type type_ = PickNothingOrTest;
 
-  std::unordered_map<PoolId, std::deque<std::pair<ClassId, ClassId>>> recentRebalanceEvents_;
+  std::unordered_map<PoolId, std::deque<RebalanceContext>> recentRebalanceEvents_;
   static constexpr size_t kMaxQueueSize = 20;
 
   // maintain the state of the previous snapshot of pool for every pool.  We

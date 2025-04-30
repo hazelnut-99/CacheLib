@@ -1203,6 +1203,9 @@ Stats Cache<Allocator>::getStats() const {
       1.0 - (static_cast<double>(aggregate.freeMemoryBytes())) /
                 aggregate.poolUsableSize;
   Stats ret;
+  ret.poolUsableSize = aggregate.poolUsableSize;
+  ret.poolUnusedBytes = aggregate.freeMemoryBytes();
+
   ret.poolUsageFraction.push_back(usageFraction);
   for (size_t pid = 1; pid < pools_.size(); pid++) {
     auto poolStats = cache_->getPoolStats(static_cast<PoolId>(pid));
@@ -1213,15 +1216,24 @@ Stats Cache<Allocator>::getStats() const {
   }
 
   std::map<PoolId, std::map<ClassId, ACStats>> allocationClassStats{};
-  std::map<PoolId, std::map<ClassId, uint64_t>> acEvictionAgeStats{};  
+  std::map<PoolId, std::map<ClassId, uint64_t>> acEvictionAgeStats{}; 
+  std::map<PoolId, unsigned int> poolFragementationSize{}; 
+  std::map<PoolId, std::map<ClassId, uint64_t>> perPoolFragmentationSize{}; 
+  std::map<PoolId, std::map<ClassId, uint64_t>> perPoolFreeMemorySize{};
+
 
   for (size_t pid = 0; pid < pools_.size(); pid++) {
     PoolId poolId = static_cast<PoolId>(pid);
     auto poolStats = cache_->getPoolStats(poolId);
+    poolFragementationSize[poolId] = poolStats.totalFragmentation();
     auto cids = poolStats.getClassIds();
     for (auto [cid, stats] : poolStats.mpStats.acStats) {
       allocationClassStats[poolId][cid] = stats;
       acEvictionAgeStats[poolId][cid] = poolStats.evictionAgeForClass(cid);
+      perPoolFreeMemorySize[poolId][cid] = stats.getTotalFreeMemory();
+    }
+    for (auto [cid, stats]: poolStats.cacheStats) {
+      perPoolFragmentationSize[poolId][cid] = stats.fragmentationSize;
     }
     // Populate rebalance events
     const auto& rebalancer_events = cache_->getAllSlabReleaseEvents(pid).rebalancerEvents;
@@ -1231,11 +1243,15 @@ Stats Cache<Allocator>::getStats() const {
     }
   }
 
+  ret.perPoolFragmentationSize = perPoolFragmentationSize;
+  ret.perPoolFreeMemorySize = perPoolFreeMemorySize;
+
+  // this is actually PoolStats
   const auto cacheStats = cache_->getGlobalCacheStats();
   const auto slabReleaseStats = cache_->getSlabReleaseStats();
   const auto navyStats = cache_->getNvmCacheStatsMap().toMap();
 
-
+  ret.poolFragementationSize = poolFragementationSize;
   ret.acNumCacheGets = acNumCacheGets_;
   ret.acNumCacheMisses = acNumCacheMisses_;
   ret.allocationClassStats = allocationClassStats;

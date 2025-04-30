@@ -55,12 +55,14 @@ struct Stats {
 
   uint64_t numEvictions{0};
   uint64_t numItems{0};
+  uint64_t poolUsableSize{0};
 
   uint64_t evictAttempts{0};
   uint64_t allocAttempts{0};
   uint64_t allocFailures{0};
 
   std::vector<double> poolUsageFraction;
+  uint64_t poolUnusedBytes{0};
 
   uint64_t numCacheGets{0};
   uint64_t numCacheGetMiss{0};
@@ -135,12 +137,18 @@ struct Stats {
   int64_t unDestructedItemCount{0};
 
   std::map<PoolId, std::map<ClassId, ACStats>> allocationClassStats;
-  std::map<PoolId, std::map<ClassId, uint64_t>> acEvictionAgeStats;  
+  std::map<PoolId, std::map<ClassId, uint64_t>> acEvictionAgeStats;
+
+  std::map<PoolId, std::map<ClassId, uint64_t>> perPoolFragmentationSize; 
+  std::map<PoolId, std::map<ClassId, uint64_t>> perPoolFreeMemorySize;
+
+  std::map<PoolId, unsigned int> poolFragementationSize;
 
   std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheGets;
   std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheMisses;
 
-  std::map<PoolId, std::vector<std::tuple<ClassId, ClassId, uint64_t>>> rebalanceEvents;
+  std::map<PoolId, std::vector<std::tuple<ClassId, ClassId, uint64_t>>>
+      rebalanceEvents;
 
   // populate the counters related to nvm usage. Cache implementation can decide
   // what to populate since not all of those are interesting when running
@@ -155,31 +163,58 @@ struct Stats {
 
   void renderToJson(const std::string& filename) const {
     folly::dynamic json = folly::dynamic::object;
-  
+
     auto totalMisses = getTotalMisses();
     const double overallHitRatio = invertPctFn(totalMisses, numCacheGets);
-  
+
     json["totalMissCnt"] = totalMisses;
     json["getMissCnt"] = numCacheGetMiss;
     json["getCnt"] = numCacheGets;
     json["getMissRatio"] = invertPctFn(numCacheGetMiss, numCacheGets);
-  
+    json["poolUsableSize"] = poolUsableSize;  
+    json["poolFragmentationSize"] = poolFragementationSize.at(0);
+    json["poolFragementationFraction"] = 
+        static_cast<double>(poolFragementationSize.at(0)) / poolUsableSize;
+    json["poolUnusedBytes"] = poolUnusedBytes;
+    json["poolUnusedFraction"] =
+        static_cast<double>(poolUnusedBytes) / poolUsableSize;
+
     json["ramItem"] = numItems;
     json["nvmItem"] = numNvmItems;
     json["allocFailures"] = allocFailures;
-  
+
     json["allocAttempts"] = allocAttempts;
     json["evicAttempts"] = evictAttempts;
     json["numEvictions"] = numEvictions;
     json["ramEvictions"] = numEvictions;
-  
+
     json["rebalancerNumRuns"] = rebalancerNumRuns;
     json["rebalancerPickVictimRounds"] = rebalancerPickVictimRounds;
     json["rebalancerNumRebalancedSlabs"] = rebalancerNumRebalancedSlabs;
     json["rebalancerAvgRebalanceTimeMs"] = rebalancerAvgRebalanceTimeMs;
     json["rebalancerAvgReleaseTimeMs"] = rebalancerAvgReleaseTimeMs;
     json["rebalancerAvgPickTimeMs"] = rebalancerAvgPickTimeMs;
+
+    folly::dynamic fragmentationJson = folly::dynamic::array;
+    for (const auto& [pid, classMap] : perPoolFragmentationSize) {
+      folly::dynamic classJson = folly::dynamic::array;
+      for (const auto& [cid, size] : classMap) {
+        classJson.push_back(folly::dynamic::object("classId", cid)("size", size));
+      }
+      fragmentationJson.push_back(folly::dynamic::object("poolId", pid)("classes", classJson));
+    }
+    json["perPoolFragmentationSize"] = fragmentationJson;
   
+    folly::dynamic freeMemoryJson = folly::dynamic::array;
+    for (const auto& [pid, classMap] : perPoolFreeMemorySize) {
+      folly::dynamic classJson = folly::dynamic::array;
+      for (const auto& [cid, size] : classMap) {
+        classJson.push_back(folly::dynamic::object("classId", cid)("size", size));
+      }
+      freeMemoryJson.push_back(folly::dynamic::object("poolId", pid)("classes", classJson));
+    }
+    json["perPoolFreeMemorySize"] = freeMemoryJson;
+
     folly::dynamic acMissRates = folly::dynamic::array;
     for (const auto& [pid, cidMap] : acNumCacheGets) {
       for (const auto& [cid, numGets] : cidMap) {
@@ -188,36 +223,34 @@ struct Stats {
         }
         uint64_t numMisses = acNumCacheMisses.at(pid).at(cid);
         double missRatio = pctFn(numMisses, numGets);
-  
+
         const auto& stats = allocationClassStats.at(pid).at(cid);
         auto allocSize = stats.allocSize;
         auto totalSlabs = stats.freeSlabs + stats.usedSlabs;
-  
-        acMissRates.push_back(folly::dynamic::object
-          ("pid", pid)
-          ("cid", cid)
-          ("allocSize", allocSize)
-          ("getCnt", numGets)
-          ("getMissCnt", numMisses)
-          ("getMissRatio", missRatio)
-          ("totalSlabs", totalSlabs));
+
+        acMissRates.push_back(folly::dynamic::object("pid", pid)("cid", cid)(
+            "allocSize", allocSize)("getCnt", numGets)("getMissCnt", numMisses)(
+            "getMissRatio", missRatio)("totalSlabs", totalSlabs));
       }
     }
     json["acStats"] = acMissRates;
-  
+
     folly::dynamic rebalanceEventsJson = folly::dynamic::array;
     for (const auto& [pid, events] : rebalanceEvents) {
       folly::dynamic eventArray = folly::dynamic::array;
       for (const auto& [from, to, request_id] : events) {
-        eventArray.push_back(folly::dynamic::object("from", from)("to", to)("request_id", request_id));
+        eventArray.push_back(folly::dynamic::object("from", from)("to", to)(
+            "request_id", request_id));
       }
-      rebalanceEventsJson.push_back(folly::dynamic::object("pid", pid)("events", eventArray));
+      rebalanceEventsJson.push_back(
+          folly::dynamic::object("pid", pid)("events", eventArray));
     }
     json["rebalanceEvents"] = rebalanceEventsJson;
-  
+
     folly::dynamic poolUsageJson = folly::dynamic::array;
     for (auto pid = 0U; pid < poolUsageFraction.size(); pid++) {
-      poolUsageJson.push_back(folly::dynamic::object("pid", pid)("usage", poolUsageFraction[pid]));
+      poolUsageJson.push_back(
+          folly::dynamic::object("pid", pid)("usage", poolUsageFraction[pid]));
     }
     json["poolUsageFraction"] = poolUsageJson;
 
@@ -229,12 +262,13 @@ struct Stats {
         }
       }
     };
-  
+
     foreachAC(acEvictionAgeStats, [&](auto pid, auto cid, auto age) {
-      evictionAgeJson.push_back(folly::dynamic::object("pid", pid)("cid", cid)("evictionAge", age));
+      evictionAgeJson.push_back(
+          folly::dynamic::object("pid", pid)("cid", cid)("evictionAge", age));
     });
     json["acEvictionAgeStats"] = evictionAgeJson;
-  
+
     std::string jsonString = folly::toJson(json);
     std::ofstream outFile(filename);
     if (outFile.is_open()) {
@@ -243,21 +277,24 @@ struct Stats {
     } else {
       throw std::runtime_error("Unable to open file: " + filename);
     }
-  }  
+  }
 
   void render(std::ostream& out) const {
     auto totalMisses = getTotalMisses();
     const double overallHitRatio = invertPctFn(totalMisses, numCacheGets);
 
     out << folly::sformat("Total Misses  : {:,}", totalMisses) << std::endl;
-    out << folly::sformat("Num Cache Gets Misses  : {:,}", numCacheGetMiss) << std::endl;
+    out << folly::sformat("Num Cache Gets Misses  : {:,}", numCacheGetMiss)
+        << std::endl;
     out << folly::sformat("Num Cache Gets  : {:,}", numCacheGets) << std::endl;
-    out << folly::sformat("Get Miss Ratio : {:.2f}%", invertPctFn(numCacheGetMiss, numCacheGets)) << std::endl;
-
+    out << folly::sformat("Get Miss Ratio : {:.2f}%",
+                          invertPctFn(numCacheGetMiss, numCacheGets))
+        << std::endl;
 
     out << folly::sformat("Items in RAM  : {:,}", numItems) << std::endl;
     out << folly::sformat("Items in NVM  : {:,}", numNvmItems) << std::endl;
-    out << folly::sformat("Allocation Failures  : {:,}", allocFailures) << std::endl;
+    out << folly::sformat("Allocation Failures  : {:,}", allocFailures)
+        << std::endl;
 
     out << folly::sformat("Alloc Attempts: {:,} Success: {:.2f}%",
                           allocAttempts,
@@ -271,8 +308,9 @@ struct Stats {
 
     out << folly::sformat("Rebalance Num Runs  : {:,}", rebalancerNumRuns)
         << std::endl;
-    out << folly::sformat("Rebalance Num Pick Victim Runs  : {:,}", rebalancerPickVictimRounds)
-        << std::endl; 
+    out << folly::sformat("Rebalance Num Pick Victim Runs  : {:,}",
+                          rebalancerPickVictimRounds)
+        << std::endl;
     out << folly::sformat("Rebalance Num Rebalanced Slabs  : {:,}",
                           rebalancerNumRebalancedSlabs)
         << std::endl;
@@ -287,45 +325,51 @@ struct Stats {
         << std::endl;
 
     out << folly::sformat("moveAttemptsForSlabRelease  : {:,}",
-        moveAttemptsForSlabRelease)
+                          moveAttemptsForSlabRelease)
         << std::endl;
     out << folly::sformat("moveSuccessesForSlabRelease  : {:,}",
-        moveSuccessesForSlabRelease)
+                          moveSuccessesForSlabRelease)
         << std::endl;
     out << folly::sformat("evictionAttemptsForSlabRelease  : {:,}",
-      evictionAttemptsForSlabRelease)
-          << std::endl;
+                          evictionAttemptsForSlabRelease)
+        << std::endl;
     out << folly::sformat("evictionSuccessesForSlabRelease  : {:,}",
-        evictionSuccessesForSlabRelease)
-          << std::endl;
-    
+                          evictionSuccessesForSlabRelease)
+        << std::endl;
+
     for (const auto& [pid, cidMap] : acNumCacheGets) {
-          for (const auto& [cid, numGets] : cidMap) {
-            if(numGets == 0) {
-              continue;
-            }
-            uint64_t numMisses = acNumCacheMisses.at(pid).at(cid);
-            double missRatio = pctFn(numMisses, numGets);
+      for (const auto& [cid, numGets] : cidMap) {
+        if (numGets == 0) {
+          continue;
+        }
+        uint64_t numMisses = acNumCacheMisses.at(pid).at(cid);
+        double missRatio = pctFn(numMisses, numGets);
 
-            const auto& stats = allocationClassStats.at(pid).at(cid);
-            auto allocSize = stats.allocSize;
-            auto totalSlabs = stats.freeSlabs + stats.usedSlabs;
+        const auto& stats = allocationClassStats.at(pid).at(cid);
+        auto allocSize = stats.allocSize;
+        auto totalSlabs = stats.freeSlabs + stats.usedSlabs;
 
-            out << folly::sformat("AC_Miss_rate: pid: {:2},cid: {:4},allocSize: {:8},Gets: {:10},missRatio: {:7.2f}%,totalSlabs: {:8}", pid, cid, allocSize, numGets, missRatio, totalSlabs) << std::endl;
-          }
+        out << folly::sformat(
+                   "AC_Miss_rate: pid: {:2},cid: {:4},allocSize: {:8},Gets: "
+                   "{:10},missRatio: {:7.2f}%,totalSlabs: {:8}",
+                   pid, cid, allocSize, numGets, missRatio, totalSlabs)
+            << std::endl;
       }
+    }
 
     // Inside the render function
 
     // Print rebalance events
     for (const auto& [pid, events] : rebalanceEvents) {
-      out << folly::sformat("Rebalancing events, Pool ID: {:2}", pid) << std::endl;
+      out << folly::sformat("Rebalancing events, Pool ID: {:2}", pid)
+          << std::endl;
       for (const auto& [from, to, request_id] : events) {
-          out << folly::sformat("request_id: {:12}  from: {:4} to: {:4}", request_id, from, to) << std::endl;
+        out << folly::sformat("request_id: {:12}  from: {:4} to: {:4}",
+                              request_id, from, to)
+            << std::endl;
       }
     }
 
-    
     auto foreachAC = [](const auto& map, auto cb) {
       for (auto& pidStat : map) {
         for (auto& cidStat : pidStat.second) {
@@ -339,6 +383,18 @@ struct Stats {
                             poolUsageFraction[pid])
           << std::endl;
     }
+    out << folly::sformat("Usable capacity of the pool {:,} : {:,}", 0, poolUsableSize) << std::endl;
+    out << folly::sformat("Unused bytes in pool {:,} : {:,}", 0,
+                          poolUnusedBytes)
+        << std::endl; 
+    out << folly::sformat("Unused fraction of pool {:,} : {:.2f}", 0,
+                          static_cast<double>(poolUnusedBytes) /
+                              poolUsableSize)  << std::endl; ;
+    out << folly::sformat("Fragmentation size of pool {:,} : {:,}", 0,
+      poolFragementationSize.at(0)) << std::endl;
+    out << folly::sformat("Fragmentation fraction of pool {:,} : {:.4f}", 0,
+      static_cast<double>(poolFragementationSize.at(0)) /
+      poolUsableSize) << std::endl;
 
     if (FLAGS_report_ac_memory_usage_stats != "") {
       auto formatMemory = [&](size_t bytes) -> std::tuple<std::string, double> {
@@ -393,8 +449,10 @@ struct Stats {
         }
 
         out << folly::sformat(
-                   "pid{:2} cid{:4} {:8.2f}{} usageFraction: {:4.2f} freeSlabs: {:4}", pid, cid,
-                   allocSize, allocSizeSuffix, acUsageFraction, stats.freeSlabs)
+                   "pid{:2} cid{:4} {:8.2f}{} usageFraction: {:4.2f} "
+                   "freeSlabs: {:4}",
+                   pid, cid, allocSize, allocSizeSuffix, acUsageFraction,
+                   stats.freeSlabs)
             << std::endl;
       });
     }
