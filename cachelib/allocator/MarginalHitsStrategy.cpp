@@ -107,6 +107,7 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
         "class_delta_evictions", poolState.at(it).getDeltaEvictions(poolStats))(
         "class_alloc_failures", poolState.at(it).deltaAllocFailures(poolStats))(
         "delta_cold_hits", poolState.at(it).getColdHits(poolStats))(
+        "delta_total_hits_corrected", poolState.at(it).deltaHits(poolStats))(  
         "delta_warm_hits", poolState.at(it).getWarmHits(poolStats))(
         "delta_hot_hits", poolState.at(it).getHotHits(poolStats))(
         "delta_total_hits", poolState.at(it).getColdHits(poolStats) +
@@ -173,6 +174,10 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     for (const auto i : poolStats.getClassIds()) {
       poolState[i].updateTailHits(poolStats);
     }
+  }
+
+  for (const auto i : poolStats.getClassIds()) {
+    poolState[i].updateHits(poolStats);
   }
 
   return ctx;
