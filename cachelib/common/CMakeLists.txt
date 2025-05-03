@@ -28,6 +28,9 @@ add_library (cachelib_common
   piecewise/RequestRange.cpp
   Serialization.cpp
   Utils.cpp
+  SplayTree.cpp
+  Shards.cpp
+  ShardsFixedSize.cpp
 )
 add_dependencies(cachelib_common thrift_generated_files)
 

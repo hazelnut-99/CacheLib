@@ -3767,6 +3767,7 @@ CacheAllocator<CacheTrait>::findEviction(PoolId pid, ClassId cid) {
       return toRecycle;
     }
   }
+  //todo: possible to add to a shadow queue here
   return nullptr;
 }
 
@@ -4088,6 +4089,7 @@ CacheAllocator<CacheTrait>::findInternalWithExpiration(
       << toString(event);
 
   auto handle = findInternal(key);
+  // todo: not found search in the shadow queue
   if (UNLIKELY(!handle)) {
     if (needToBumpStats) {
       stats_.numCacheGetMiss.inc();
