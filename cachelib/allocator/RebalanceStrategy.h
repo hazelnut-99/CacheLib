@@ -30,6 +30,8 @@ struct RebalanceContext {
 
   double diffValue{0.0};
 
+  double normalizedRange{0.0};
+
 
   RebalanceContext() = default;
   RebalanceContext(ClassId victim, ClassId receiver)
@@ -94,11 +96,15 @@ class RebalanceStrategy {
 
   double getMinDiffValueFromRebalanceEvents(PoolId pid) const;
 
+  double getMedianNormalizedRangeFromRebalanceEvents(PoolId pid) const;
+
   unsigned int getRebalanceEventQueueSize(PoolId pid) const;
 
   void clearPoolRebalanceEvent(PoolId pid);
 
   bool checkForThrashing(PoolId pid);
+
+  double queryEffectiveMoveRate(PoolId pid);
 
  protected:
   using PoolState = std::array<detail::Info, MemoryAllocator::kMaxClasses>;

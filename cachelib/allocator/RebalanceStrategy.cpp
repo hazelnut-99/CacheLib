@@ -309,10 +309,10 @@ void RebalanceStrategy::clearPoolRebalanceEvent(PoolId pid) {
   recentRebalanceEvents_.erase(pid);
 }
 
-bool RebalanceStrategy::checkForThrashing(PoolId pid) {
+double RebalanceStrategy::queryEffectiveMoveRate(PoolId pid) {
   const auto it = recentRebalanceEvents_.find(pid);
   if (it == recentRebalanceEvents_.end() || it->second.empty()) {
-      return false;
+      return 1.0;
   }
 
   const auto& events = it->second;
@@ -329,9 +329,47 @@ bool RebalanceStrategy::checkForThrashing(PoolId pid) {
   }
   int totalEffectiveMoves = currentAbsNet / 2;
 
-  double overallRate = static_cast<double>(totalEffectiveMoves) / events.size();
+  return static_cast<double>(totalEffectiveMoves) / events.size();
+}
+
+bool RebalanceStrategy::checkForThrashing(PoolId pid) {
+  const auto it = recentRebalanceEvents_.find(pid);
+  if (it == recentRebalanceEvents_.end() || it->second.empty()) {
+      return false;
+  }
+  const auto& events = it->second;
+
+  double overallRate = queryEffectiveMoveRate(pid);
   // todo make these criterion configurable
   return overallRate <= 0.5 && events.size() > 4;  
+}
+
+double RebalanceStrategy::getMedianNormalizedRangeFromRebalanceEvents(PoolId pid) const {
+  const auto it = recentRebalanceEvents_.find(pid);
+  if (it == recentRebalanceEvents_.end() || it->second.empty()) {
+    return 0.0; // Return 0.0 if the queue is empty or the pool ID is not found
+  }
+
+  const auto& events = it->second;
+
+  // Extract the normalizedRange values into a vector
+  std::vector<double> normalizedRanges;
+  for (const auto& ctx : events) {
+    normalizedRanges.push_back(ctx.normalizedRange);
+  }
+
+  // Sort the vector to compute the median
+  std::sort(normalizedRanges.begin(), normalizedRanges.end());
+
+  // Compute the median
+  size_t n = normalizedRanges.size();
+  if (n % 2 == 0) {
+    // Even number of elements: average the two middle values
+    return (normalizedRanges[n / 2 - 1] + normalizedRanges[n / 2]) / 2.0;
+  } else {
+    // Odd number of elements: return the middle value
+    return normalizedRanges[n / 2];
+  }
 }
 
 double RebalanceStrategy::getMinDiffValueFromRebalanceEvents(PoolId pid) const {

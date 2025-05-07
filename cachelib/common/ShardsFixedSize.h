@@ -3,12 +3,13 @@
 #include "Shards.h"
 #include "SplayTree.h"
 #include <unordered_map>
-#include "Hash.h"
-#include <folly/container/F14Map.h>
-#include <folly/Range.h> 
+#include <map>
+#include <folly/Range.h> // For folly::StringPiece
+#include <folly/hash/Hash.h> // For folly::Hash
 
 namespace facebook {
 namespace cachelib {
+
 
 class ShardsFixedSize : public Shards {
     struct FrequencyType {
@@ -16,7 +17,7 @@ class ShardsFixedSize : public Shards {
         uint64_t frequency{1};
     };
 
-    folly::F14ValueMap<folly::StringPiece, uint64_t> m_timePerObject;
+    std::unordered_map<HashedKey, uint64_t, HashedKeyHash, HashedKeyEqual> m_timePerObject;
     std::unordered_map<uint32_t, FrequencyType> m_distanceHistogram;
     SplayTree<uint64_t> m_distanceTree;
 
@@ -24,10 +25,10 @@ class ShardsFixedSize : public Shards {
     uint64_t m_T{static_cast<uint64_t>(m_R * kP)};
     uint32_t m_objectCounter{0};
 
-    std::multimap<uint64_t, folly::StringPiece> m_keysPerT;
+    std::multimap<uint64_t, HashedKey> m_keysPerT;
 
-    inline uint64_t getDistance(folly::StringPiece key);
-    inline void updateHistogram(uint64_t bucket);
+    inline uint64_t getDistance(HashedKey const& key);
+    inline void updateHistogram(uint64_t const bucket);
     inline void setT(uint64_t newT);
 
 public:

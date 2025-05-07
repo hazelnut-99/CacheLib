@@ -99,6 +99,8 @@ class CacheStressor : public Stressor {
     wakeUpRebalancerEveryXReqs_ = cacheConfig.wakeUpRebalancerEveryXReqs;
     useAdaptiveRebalanceInterval_ = cacheConfig.useAdaptiveRebalanceInterval;
     useAdaptiveRebalanceIntervalV2_ = cacheConfig.useAdaptiveRebalanceIntervalV2;
+    increaseIntervalFactor_ = cacheConfig.increaseIntervalFactor;
+  
     
     // try disable all async wake-ups
     if (wakeUpRebalancerEveryXReqs_ > 0) {
@@ -367,6 +369,29 @@ class CacheStressor : public Stressor {
               }
 
               XLOGF(DBG, "Miss count from the simulator, Miss Delta Sum: {}, index: {}", currentMissDeltaSum, i);
+
+              uint64_t totalGetDelta = 0;
+              uint64_t totalMissDelta = 0;
+
+              // Sum the values in getDelta
+              for (const auto& [poolId, classMap] : getDelta) {
+                  for (const auto& [classId, getDeltaValue] : classMap) {
+                      totalGetDelta += getDeltaValue;
+                  }
+              }
+
+              // Sum the values in missDelta
+              for (const auto& [poolId, classMap] : missDelta) {
+                  for (const auto& [classId, missDeltaValue] : classMap) {
+                      totalMissDelta += missDeltaValue;
+                  }
+              }
+
+              // Calculate the miss ratio
+              double missRatio = totalGetDelta > 0 ? static_cast<double>(totalMissDelta) / totalGetDelta : 0.0;
+
+              // Log the result in JSON format
+              XLOGF(DBG, "miss_ratio_logging: {{\"i\": {}, \"miss_ratio\": {}}}", i, missRatio);
               
               // Print the delta for both gets and misses
               for (const auto& [poolId, classMap] : getDelta) {
@@ -410,8 +435,8 @@ class CacheStressor : public Stressor {
               auto rebalanceEventCount = cache_->getRebalancerPoolEventCount(pid);
               if (thrashingDected) {
                 XLOGF(INFO, "Effective movement rate is low, increasing "
-                          "the rebalance interval, from {} : {}", wakeUpRebalancerEveryXReqs_ * rebalanceIntervalTimes_, wakeUpRebalancerEveryXReqs_ * rebalanceIntervalTimes_ * 2);
-                rebalanceIntervalTimes_ *= 2;
+                          "the rebalance interval, from {} : {}", wakeUpRebalancerEveryXReqs_ * rebalanceIntervalTimes_, wakeUpRebalancerEveryXReqs_ * rebalanceIntervalTimes_ * increaseIntervalFactor_);
+                rebalanceIntervalTimes_ *= increaseIntervalFactor_;
                 cache_->clearRebalancerPoolEventMap(pid);
               }
             }
@@ -742,6 +767,8 @@ class CacheStressor : public Stressor {
   bool useAdaptiveRebalanceInterval_;
 
   bool useAdaptiveRebalanceIntervalV2_;
+
+  unsigned int increaseIntervalFactor_;
 
   std::deque<uint64_t> lastTenMissDeltaSums_;
 

@@ -30,6 +30,7 @@ add_library (cachelib_common
   Utils.cpp
   SplayTree.cpp
   Shards.cpp
+  ShardsFixedRate.cpp
   ShardsFixedSize.cpp
 )
 add_dependencies(cachelib_common thrift_generated_files)

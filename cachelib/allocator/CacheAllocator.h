@@ -77,6 +77,7 @@
 #include "cachelib/common/Mutex.h"
 #include "cachelib/common/PeriodicWorker.h"
 #include "cachelib/common/Serialization.h"
+#include "cachelib/common/Shards.h"
 #include "cachelib/common/Throttler.h"
 #include "cachelib/common/Time.h"
 #include "cachelib/common/Utils.h"
@@ -362,6 +363,10 @@ class CacheAllocator : public CacheBase {
   using AccessSerializationType = typename AccessType::SerializationType;
 
   using ShmManager = facebook::cachelib::ShmManager;
+
+  using PoolClassToShardsMap =
+      std::unordered_map<PoolId,
+                         std::unordered_map<ClassId, std::unique_ptr<Shards>>>;
 
   // The shared memory segments that can be persisted and re-attached to
   enum SharedMemNewT { SharedMemNew };
@@ -989,6 +994,12 @@ class CacheAllocator : public CacheBase {
   bool startNewPoolRebalancer(std::chrono::milliseconds interval,
                               std::shared_ptr<RebalanceStrategy> strategy,
                               unsigned int freeAllocThreshold);
+
+  std::map<uint64_t, double> queryShardsMrc(PoolId pid,
+                                            ClassId cid) const override;
+
+  std::unordered_map<uint64_t, uint64_t> queryShardsHistogram(
+      PoolId pid, ClassId cid) const override;
 
   // start pool resizer
   // @param interval                the period this worker fires.
@@ -2206,6 +2217,8 @@ class CacheAllocator : public CacheBase {
   // we need mmcontainer per allocator pool/allocation class.
   MMContainers mmContainers_;
 
+  PoolClassToShardsMap poolClassToShards_;
+
   // container that is used for accessing the allocations by their key.
   std::unique_ptr<AccessContainer> accessContainer_;
 
@@ -2714,7 +2727,7 @@ CacheAllocator<CacheTrait>::allocateInternal(PoolId pid,
 
   } else { // failed to allocate memory.
     (*stats_.allocFailures)[pid][cid].inc();
-    if(poolRebalancer_) {
+    if (poolRebalancer_) {
       poolRebalancer_->processAllocFailure(pid);
     }
     // wake up rebalancer
@@ -3351,6 +3364,12 @@ void CacheAllocator<CacheTrait>::insertInMMContainer(Item& item) {
     throw std::runtime_error(folly::sformat(
         "Invalid state. Node {} was already in the container.", &item));
   }
+  if (config_.enableShardsMrc) {
+    const auto allocInfo =
+        allocator_->getAllocInfo(static_cast<const void*>(&item));
+    poolClassToShards_[allocInfo.poolId][allocInfo.classId]->feed(
+        HashedKey(item.getKey()));
+  }
 }
 
 /**
@@ -3767,7 +3786,7 @@ CacheAllocator<CacheTrait>::findEviction(PoolId pid, ClassId cid) {
       return toRecycle;
     }
   }
-  //todo: possible to add to a shadow queue here
+  // todo: possible to add to a shadow queue here
   return nullptr;
 }
 
@@ -4226,6 +4245,10 @@ bool CacheAllocator<CacheTrait>::recordAccessInMMContainer(Item& item,
   const auto allocInfo =
       allocator_->getAllocInfo(static_cast<const void*>(&item));
   (*stats_.cacheHits)[allocInfo.poolId][allocInfo.classId].inc();
+  if (config_.enableShardsMrc) {
+    poolClassToShards_[allocInfo.poolId][allocInfo.classId]->feed(
+        HashedKey(item.getKey()));
+  }
 
   // track recently accessed items if needed
   if (UNLIKELY(config_.trackRecentItemsForDump)) {
@@ -4527,17 +4550,61 @@ void CacheAllocator<CacheTrait>::wakeupPoolRebalancer(bool synchronous,
 }
 
 template <typename CacheTrait>
-void CacheAllocator<CacheTrait>::clearRebalancerPoolEventMap(PoolId pid){
+std::map<uint64_t, double> CacheAllocator<CacheTrait>::queryShardsMrc(
+    PoolId pid, ClassId cid) const {
+  if (!config_.enableShardsMrc) {
+    XLOG(DBG) << "Shards MRC is not enabled in the configuration.";
+    return {};
+  }
+
+  auto poolIt = poolClassToShards_.find(pid);
+  auto classIt = (poolIt != poolClassToShards_.end()) ? poolIt->second.find(cid)
+                                                      : poolIt->second.end();
+  if (poolIt == poolClassToShards_.end() || classIt == poolIt->second.end() ||
+      !classIt->second) {
+    XLOG(DBG) << "Invalid PoolId " << pid << " or ClassId " << cid
+              << ", or Shards pointer is null.";
+    return {};
+  }
+
+  return classIt->second->mrc();
+}
+
+template <typename CacheTrait>
+std::unordered_map<uint64_t, uint64_t>
+CacheAllocator<CacheTrait>::queryShardsHistogram(PoolId pid,
+                                                 ClassId cid) const {
+  if (!config_.enableShardsMrc) {
+    XLOG(DBG) << "Shards MRC is not enabled in the configuration.";
+    return {};
+  }
+
+  auto poolIt = poolClassToShards_.find(pid);
+  auto classIt = (poolIt != poolClassToShards_.end()) ? poolIt->second.find(cid)
+                                                      : poolIt->second.end();
+  if (poolIt == poolClassToShards_.end() || classIt == poolIt->second.end() ||
+      !classIt->second) {
+    XLOG(DBG) << "Invalid PoolId " << pid << " or ClassId " << cid
+              << ", or Shards pointer is null.";
+    return {};
+  }
+
+  return classIt->second->getReuseDistanceHistogram();
+}
+
+template <typename CacheTrait>
+void CacheAllocator<CacheTrait>::clearRebalancerPoolEventMap(PoolId pid) {
   poolRebalancer_->clearPoolEventMap(pid);
 }
 
 template <typename CacheTrait>
-bool CacheAllocator<CacheTrait>::checkForRebalanceThrashing(PoolId pid){
+bool CacheAllocator<CacheTrait>::checkForRebalanceThrashing(PoolId pid) {
   return poolRebalancer_->checkForThrashing(pid);
 }
 
 template <typename CacheTrait>
-unsigned int CacheAllocator<CacheTrait>::getRebalancerPoolEventCount(PoolId pid){
+unsigned int CacheAllocator<CacheTrait>::getRebalancerPoolEventCount(
+    PoolId pid) {
   return poolRebalancer_->getRebalanceEventQueueSize(pid);
 }
 
@@ -4603,6 +4670,11 @@ void CacheAllocator<CacheTrait>::createMMContainers(const PoolId pid,
             : 0,
         config_.countColdTailHitsOnly);
     mmContainers_[pid][cid].reset(new MMContainer(config, compressor_));
+    if (config_.enableShardsMrc) {
+      poolClassToShards_[pid][cid] = std::unique_ptr<Shards>(Shards::fixedRate(
+          0.001, pool.getAllocationClass(static_cast<ClassId>(cid))
+                     .getAllocsPerSlab()));
+    }
   }
 }
 

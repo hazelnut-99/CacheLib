@@ -102,6 +102,14 @@ class CacheBase {
   // @param poolId   the pool id
   virtual PoolStats getPoolStats(PoolId poolId) const = 0;
 
+  virtual std::map<uint64_t, double> queryShardsMrc(PoolId, ClassId) const {
+    return {};
+  }
+
+  virtual std::unordered_map<uint64_t, uint64_t> queryShardsHistogram(PoolId, ClassId) const {
+    return {};
+  }
+
   // @param poolId   the pool id
   virtual AllSlabReleaseEvents getAllSlabReleaseEvents(PoolId poolId) const = 0;
 
@@ -115,6 +123,7 @@ class CacheBase {
   // @return PoolEvictionAgeStats   see CacheStats.h
   virtual PoolEvictionAgeStats getPoolEvictionAgeStats(
       PoolId pid, unsigned int slabProjectionLength) const = 0;
+  
 
   // @return a map of <stat name -> stat value> representation for all the nvm
   // cache stats. This is useful for our monitoring to directly upload them.

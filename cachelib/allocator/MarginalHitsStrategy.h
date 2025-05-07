@@ -59,6 +59,14 @@ class MarginalHitsStrategy : public RebalanceStrategy {
 
     bool autoDecThreshold{false};
 
+    bool aimdThreshold{false};
+
+    bool useProbablisticDecision{false};
+
+    double normalizedRangeThreshold{0.0};
+
+    unsigned int randomSeed{42};
+
     Config() noexcept {}
     explicit Config(double param) noexcept : Config(param, 1, 1) {}
     Config(double param, unsigned int minSlab, unsigned int maxFree) noexcept
@@ -113,6 +121,11 @@ class MarginalHitsStrategy : public RebalanceStrategy {
   // compute delta of tail hits for every class in this pool
   std::unordered_map<ClassId, double> computeClassMarginalHits(
       PoolId pid, const PoolStats& poolStats, unsigned int tailSlabCnt);
+
+  double computeNormalizedMarginalHitsRange(const std::unordered_map<ClassId, double>& scores, double epsilon = 1e-9) const;
+  
+  std::unordered_map<ClassId, double> calculateWeightedMissRateGradients(
+    const CacheBase& cache, PoolId pid, const PoolStats& poolStats);
 
   // pick victim and receiver according to smoothed rankings
   RebalanceContext pickVictimAndReceiverFromRankings(

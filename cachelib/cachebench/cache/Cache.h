@@ -576,6 +576,7 @@ Cache<Allocator>::Cache(const CacheConfig& config,
       config_.poolRebalancerFreeAllocThreshold;
   allocatorConfig_.countColdTailHitsOnly = config_.countColdTailHitsOnly;
   allocatorConfig_.tailSlabCnt = config_.tailSlabCnt;
+  allocatorConfig_.enableShardsMrc = config_.enableShardsMrc;
   
 
   // if (config_.moveOnSlabRelease && movingSync != nullptr) {

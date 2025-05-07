@@ -1,5 +1,4 @@
 #include "ShardsFixedSize.h"
-#include "Hash.h" 
 #include <cassert>
 
 namespace facebook {
@@ -20,16 +19,16 @@ void ShardsFixedSize::setT(uint64_t newT) {
     m_R = static_cast<double>(m_T) / kP;
 }
 
-uint64_t ShardsFixedSize::getDistance(folly::StringPiece key) {
+uint64_t ShardsFixedSize::getDistance(HashedKey const& hk) {
     uint64_t distance = 0;
-    auto const [pair, inserted] = m_timePerObject.emplace(key, m_objectCounter);
+    auto const [pair, inserted] = m_timePerObject.emplace(hk, m_objectCounter);
     auto& time = pair->second;
     if (!inserted) {
-        // if the key already existed
+        // If the key already existed
         distance = m_distanceTree.greater_or_equal_to(time);
         m_distanceTree.erase(time);
         time = m_objectCounter;
-    } // else, the key did not exist (therefore, previous emplace successful)
+    }
     m_distanceTree.insert(m_objectCounter);
     return distance;
 }
@@ -37,7 +36,7 @@ uint64_t ShardsFixedSize::getDistance(folly::StringPiece key) {
 void ShardsFixedSize::updateHistogram(uint64_t const bucket) {
     auto const [pair, inserted] = m_distanceHistogram.emplace(bucket, FrequencyType{m_T, 1});
     if (!inserted) {
-        // if bucket already existed (therefore, emplace successful)
+        // If bucket already existed
         auto& [T, f] = pair->second;
         if (T != m_T) {
             f = 2 + f * static_cast<double>(m_T) / T;
@@ -49,24 +48,20 @@ void ShardsFixedSize::updateHistogram(uint64_t const bucket) {
 }
 
 void ShardsFixedSize::feed(HashedKey hk) {
-    uint64_t const Ti = hk.keyHash() % kP;
+    uint64_t const Ti{hk.keyHash() % kP};
 
     if (Ti < m_T) {
         m_objectCounter++;
-        uint64_t const distance = getDistance(hk.key()) / m_R;
-        updateHistogram(distance == 0 ? 0 : ((distance - 1) / kBucketSize) * kBucketSize + kBucketSize);
+        uint64_t const distance = getDistance(hk) / m_R;
+        updateHistogram((distance == 0) ? 0 : (((distance - 1) / kBucketSize) + 1));
 
-        if (distance == 0) { // then key is new
-            m_keysPerT.emplace(Ti, hk.key());
+        if (distance == 0) { // Then key is new
+            m_keysPerT.emplace(Ti, hk);
             if (m_keysPerT.size() > kSMax) {
                 auto const TMax = m_keysPerT.rbegin()->first;
                 auto const [start, end] = m_keysPerT.equal_range(TMax);
                 for (auto keyToRemove = start; keyToRemove != end; keyToRemove++) {
-                    auto it = m_timePerObject.find(keyToRemove->second);
-                    if (it != m_timePerObject.end()) {
-                        m_distanceTree.erase(it->second); 
-                        m_timePerObject.erase(it);        
-                    }
+                    m_distanceTree.erase(m_timePerObject.extract(keyToRemove->second).mapped());
                 }
                 m_keysPerT.erase(start, end);
                 setT(TMax);
@@ -75,14 +70,15 @@ void ShardsFixedSize::feed(HashedKey hk) {
     }
 }
 
-std::map<uint64_t, double> ShardsFixedSize::mrc() {
+std::map<uint64_t, double> ShardsFixedSize::mrc(){
     std::map<uint64_t, double> mrc{};
+    mrc[0] = 1.0;
     if (!m_distanceHistogram.empty()) {
         uint64_t sum{0};
         for (auto& [bucket, ft] : m_distanceHistogram) {
             auto& [T, f] = ft;
             if (T != m_T) {
-                // if T is old, update bucket
+                // If T is old, update bucket
                 f = 1 + f * static_cast<double>(m_T) / T;
                 T = m_T;
             }

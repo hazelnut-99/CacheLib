@@ -58,9 +58,24 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     }
   }
 
+  if(config.aimdThreshold){
+    double effectiveMoveRate = queryEffectiveMoveRate(pid);
+    auto eventQueueSize = getRebalanceEventQueueSize(pid);
+    if(eventQueueSize > 4){
+      if(effectiveMoveRate <= 0.5){
+        increaseRebalanceThreshold(std::max(1.0, minDiffInUse_ * 2 - 1));
+        clearPoolRebalanceEvent(pid);
+      } else if(effectiveMoveRate >= 0.9){
+        decreaseRebalanceThreshold();
+      }
+    }
+  }
+
+
   XLOGF(DBG, "rebalance_threshold: {}", minDiffInUse_);
 
   auto scores = computeClassMarginalHits(pid, poolStats, config.tailSlabCnt);
+  //auto scores = calculateWeightedMissRateGradients(cache, pid, poolStats);
   auto classesSet = poolStats.getClassIds();
   std::vector<ClassId> classes(classesSet.begin(), classesSet.end());
   std::unordered_map<ClassId, bool> validVictim;
@@ -98,6 +113,14 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
   folly::dynamic logArray = folly::dynamic::array;
   for (auto it : classes) {
     auto acStats = poolStats.mpStats.acStats;
+
+    auto shardsHitHistogram = cache.queryShardsHistogram(pid, it);
+    uint64_t totalSlabs = acStats.at(it).totalSlabs();
+  
+    auto weightedMissRateGradient = shardsHitHistogram.count(totalSlabs) ? shardsHitHistogram.at(totalSlabs) : 0; 
+    // for now
+    shardsHitHistogram.clear();
+
     folly::dynamic logData = folly::dynamic::object(
         "pool_id", static_cast<int>(pid))("class_id", static_cast<int>(it))(
         "class_total_slabs", acStats.at(it).totalSlabs())(
@@ -106,6 +129,7 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
         "class_free_allocs", acStats.at(it).freeAllocs)(
         "class_delta_evictions", poolState.at(it).getDeltaEvictions(poolStats))(
         "class_alloc_failures", poolState.at(it).deltaAllocFailures(poolStats))(
+        "weighted_miss_rate_gradient", weightedMissRateGradient)(
         "delta_cold_hits", poolState.at(it).getColdHits(poolStats))(
         "delta_total_hits_corrected", poolState.at(it).deltaHits(poolStats))(  
         "delta_warm_hits", poolState.at(it).getWarmHits(poolStats))(
@@ -158,10 +182,41 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     }
   }
   
+  if (ctx.isEffective() && config.useProbablisticDecision) {
+      double effectiveMoveRate = queryEffectiveMoveRate(pid);
+      // normalized marginal-hits range
+      double nmhr = computeNormalizedMarginalHitsRange(scores);
 
+      static std::mt19937 gen(config.randomSeed); 
+      static std::uniform_real_distribution<> dis(0.0, 1.0);
+
+      double randomValue = dis(gen);
+
+      // Make a random decision based on the probability
+      if (randomValue > effectiveMoveRate * nmhr) {
+          XLOGF(INFO, "Random decision made ctx a no-op: decisionProbability = {}, randomValue = {}",
+                effectiveMoveRate * nmhr, randomValue);
+          ctx = kNoOpContext;
+      }
+  }
+
+  if(ctx.isEffective() && config.normalizedRangeThreshold > 0){
+    auto normalizedRangeDiff = (scores.at(ctx.receiverClassId) - scores.at(ctx.victimClassId)) / (scores.at(ctx.receiverClassId) + scores.at(ctx.victimClassId + 1e-9));
+    if(normalizedRangeDiff < config.normalizedRangeThreshold){
+      XLOGF(DBG,
+            "Not enough to trigger rebalancing, receiver score: {}, victim "
+            "score: {}, normalized range: {}, threshold: {}",
+            scores.at(ctx.receiverClassId),
+            scores.at(ctx.victimClassId),
+            normalizedRangeDiff,
+            config.normalizedRangeThreshold);
+    }
+  }
 
   if (ctx.isEffective()) {
     ctx.diffValue = scores.at(ctx.receiverClassId) - scores.at(ctx.victimClassId);
+    ctx.normalizedRange =
+        computeNormalizedMarginalHitsRange(scores);
     recordRebalanceEvent(pid, ctx);
     if(config.enableHoldOff){
       poolState[ctx.receiverClassId].startVictimHoldOff();
@@ -201,6 +256,48 @@ MarginalHitsStrategy::computeClassMarginalHits(PoolId pid,
     }
   }
   return scores;
+}
+
+double MarginalHitsStrategy::computeNormalizedMarginalHitsRange(
+  const std::unordered_map<ClassId, double>& scores, double epsilon) const {
+  if (scores.empty()) {
+      return 1.0; 
+  }
+
+  // Find the minimum and maximum values in the scores map
+  auto [minIt, maxIt] = std::minmax_element(
+      scores.begin(), scores.end(),
+      [](const auto& lhs, const auto& rhs) { return lhs.second < rhs.second; });
+
+  double min = minIt->second;
+  double max = maxIt->second;
+
+  // Compute the normalized marginal hits range
+  return (max - min) / (max + min + epsilon);
+}
+
+std::unordered_map<ClassId, double>  MarginalHitsStrategy::calculateWeightedMissRateGradients(
+  const CacheBase& cache, PoolId pid, const PoolStats& poolStats) {
+    std::unordered_map<ClassId, double> result; // Map to store the results
+    auto acStats = poolStats.mpStats.acStats;
+
+    for (const auto& cid : poolStats.getClassIds()) {
+        // Query the shards hit histogram for the current class ID
+        auto shardsHitHistogram = cache.queryShardsHistogram(pid, cid);
+
+        // Get the total slabs for the current class
+        uint64_t totalSlabs = acStats.at(cid).totalSlabs();
+
+        // Calculate the weighted miss rate gradient
+        double weightedMissRateGradient = shardsHitHistogram.count(totalSlabs + 1)
+                                              ? shardsHitHistogram.at(totalSlabs + 1)
+                                              : 0;
+
+        // Store the result in the map
+        result[cid] = weightedMissRateGradient;
+    }
+
+    return result; // Return the map
 }
 
 RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverFromRankings(
