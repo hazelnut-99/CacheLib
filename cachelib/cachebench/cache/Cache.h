@@ -343,6 +343,10 @@ class Cache {
     return cache_->checkForRebalanceThrashing(pid);
   }
 
+  bool isLastRebalanceThrashing(PoolId pid) const {
+    return cache_->isLastRebalanceThrashing(pid);
+  }
+
   unsigned int getRebalancerPoolEventCount(PoolId pid){
     return cache_->getRebalancerPoolEventCount(pid);
   }

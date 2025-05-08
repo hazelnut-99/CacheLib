@@ -42,6 +42,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, rebalanceStrategy);
   JSONSetVal(configJson, rebalanceMinSlabs);
   JSONSetVal(configJson, rebalanceDiffRatio);
+  JSONSetVal(configJson, intervalAdjustmentStrategy);
 
   JSONSetVal(configJson, ltaMinTailAgeDifference);
   JSONSetVal(configJson, ltaNumSlabsFreeMem);
@@ -58,7 +59,6 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, mhMovingAverageParam);
   JSONSetVal(configJson, mhMaxFreeMemSlabs);
   JSONSetVal(configJson, mhEnableHoldOff);
-  JSONSetVal(configJson, mhNormalizedRangeThreshold);
   JSONSetVal(configJson, mhMinDiff);
   JSONSetVal(configJson, mhMinDiffRatio);
   JSONSetVal(configJson, countColdTailHitsOnly);
@@ -69,9 +69,6 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, mhOnlyUpdateHitsIfRebalance);
   JSONSetVal(configJson, mhAutoDecThreshold);
   JSONSetVal(configJson, mhAutoIncThreshold);
-  JSONSetVal(configJson, mhAimdThreshold);
-  JSONSetVal(configJson, mhUseProbablisticDecision);
-  JSONSetVal(configJson, mhRandomSeed);
 
 
   JSONSetVal(configJson, htBucketPower);
@@ -156,7 +153,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   // if you added new fields to the configuration, update the JSONSetVal
   // to make them available for the json configs and increment the size
   // below
-  checkCorrectSize<CacheConfig, 880>();
+  checkCorrectSize<CacheConfig, 896>();
 
   if (numPools != poolSizes.size()) {
     throw std::invalid_argument(folly::sformat(
@@ -206,16 +203,12 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     mhConfig.movingAverageParam = mhMovingAverageParam;
     mhConfig.maxFreeMemSlabs = mhMaxFreeMemSlabs;
     mhConfig.enableHoldOff = mhEnableHoldOff;
-    mhConfig.normalizedRangeThreshold = mhNormalizedRangeThreshold;
     mhConfig.minDiff = mhMinDiff;
     mhConfig.minDiffRatio = mhMinDiffRatio;
     mhConfig.tailSlabCnt = tailSlabCnt;
     mhConfig.decayWithHits = mhDecayWithHits;
     mhConfig.filterReceiverByEvictionRate = mhFilterReceiverByEvictionRate;
     mhConfig.autoIncThreshold = mhAutoIncThreshold;
-    mhConfig.aimdThreshold = mhAimdThreshold;
-    mhConfig.useProbablisticDecision = mhUseProbablisticDecision;
-    mhConfig.randomSeed = mhRandomSeed;
     mhConfig.autoDecThreshold = mhAutoDecThreshold;
     mhConfig.onlyUpdateHitsIfRebalance = mhOnlyUpdateHitsIfRebalance;
     return std::make_shared<MarginalHitsStrategy>(mhConfig);

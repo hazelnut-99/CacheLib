@@ -80,7 +80,9 @@ struct CacheConfig : public JSONConfig {
   uint64_t wakeUpRebalancerEveryXReqs{0};
   unsigned int increaseIntervalFactor{2};
   bool useAdaptiveRebalanceInterval{false};
-  bool useAdaptiveRebalanceIntervalV2{false}; 
+  bool useAdaptiveRebalanceIntervalV2{false};
+
+  std::string intervalAdjustmentStrategy;
   
   
   std::string rebalanceStrategy;
@@ -109,7 +111,6 @@ struct CacheConfig : public JSONConfig {
   double mhMovingAverageParam{0.3};
   unsigned int mhMaxFreeMemSlabs{1};
   bool mhEnableHoldOff{false};
-  double mhNormalizedRangeThreshold{0.0};
   bool countColdTailHitsOnly{false};
   unsigned int tailSlabCnt{1};
   bool enableShardsMrc{false};
@@ -120,9 +121,6 @@ struct CacheConfig : public JSONConfig {
   bool mhOnlyUpdateHitsIfRebalance{false};
   bool mhAutoDecThreshold{false};
   bool mhAutoIncThreshold{false};
-  bool mhAimdThreshold{false};
-  bool mhUseProbablisticDecision{false};
-  unsigned int mhRandomSeed{42};
 
   uint64_t htBucketPower{22}; // buckets in hash table
   uint64_t htLockPower{20};   // locks in hash table

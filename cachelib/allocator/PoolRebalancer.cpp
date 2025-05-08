@@ -36,6 +36,14 @@ PoolRebalancer::PoolRebalancer(CacheBase& cache,
 
 PoolRebalancer::~PoolRebalancer() { stop(std::chrono::seconds(0)); }
 
+std::shared_ptr<RebalanceStrategy> PoolRebalancer::findRebalanceStrategyForPool(PoolId pid) const {
+  auto strategy = cache_.getRebalanceStrategy(pid);
+  if (!strategy) {
+      strategy = defaultStrategy_;
+  }
+  return strategy;
+}
+
 void PoolRebalancer::work() {
   try {
     for (const auto pid : cache_.getRegularPoolIds()) {
@@ -63,10 +71,7 @@ void PoolRebalancer::publicWork(uint64_t request_id) {
   try {
     XLOG(DBG, "synchronous rebalancing");
     for (const auto pid : cache_.getRegularPoolIds()) {
-      auto strategy = cache_.getRebalanceStrategy(pid);
-      if (!strategy) {
-        strategy = defaultStrategy_;
-      }
+      auto strategy = findRebalanceStrategyForPool(pid);
       tryRebalancing(pid, *strategy, request_id);
     }
   } catch (const std::exception& ex) {
@@ -148,8 +153,9 @@ bool PoolRebalancer::tryRebalancing(PoolId pid, RebalanceStrategy& strategy, uin
 
   auto currentTimeSec = util::getCurrentTimeMs();
   const auto context = strategy.pickVictimAndReceiver(cache_, pid);
-  // add to the queue
-  //strategy.recordRebalanceEvent(pid, context);
+
+  lastRebalance_[pid] = strategy.isThrashing(pid, context);
+
   auto end = util::getCurrentTimeMs();
   pickVictimStats_.recordLoopTime(end > currentTimeSec ? end - currentTimeSec
                                                        : 0);
@@ -171,55 +177,37 @@ bool PoolRebalancer::tryRebalancing(PoolId pid, RebalanceStrategy& strategy, uin
     static_cast<int>(pid),
     static_cast<int>(context.victimClassId),
     static_cast<int>(context.receiverClassId));
-  addToPoolEventMap(pid, context.victimClassId,
-                    context.receiverClassId);
 
   return true;
 }
 
-void PoolRebalancer::addToPoolEventMap(PoolId pid, ClassId victimClassId, ClassId receiverClassId) {
-  auto& eventQueue = poolEventMap_[pid];
-  eventQueue.emplace_back(victimClassId, receiverClassId);
-
-  // Enforce the fixed size
-  if (eventQueue.size() > kMaxQueueSize) {
-    eventQueue.pop_front();
-  }
-}
-
-unsigned int PoolRebalancer::getRebalanceEventQueueSize(PoolId pid) {
-  auto& eventQueue = poolEventMap_[pid];
-  return eventQueue.size();
+unsigned int PoolRebalancer::getRebalanceEventQueueSize(PoolId pid) const{
+  auto strategy = findRebalanceStrategyForPool(pid);
+  return strategy->getRebalanceEventQueueSize(pid);
 }
 
 void PoolRebalancer::clearPoolEventMap(PoolId pid) {
-  poolEventMap_.erase(pid);
+  auto strategy = findRebalanceStrategyForPool(pid);
+  strategy->clearPoolRebalanceEvent(pid);
 }
 
-bool PoolRebalancer::checkForThrashing(PoolId pid) {
-  const auto it = poolEventMap_.find(pid);
-  if (it == poolEventMap_.end() || it->second.empty()) {
-      return false;
-  }
-
-  const auto& events = it->second;
-  std::unordered_map<ClassId, int> netChanges;
-
-  for (const auto& [fromClass, toClass] : events) {
-      netChanges[fromClass]--;
-      netChanges[toClass]++;
-  }
-
-  int currentAbsNet = 0;
-  for (const auto& [classId, net] : netChanges) {
-      currentAbsNet += std::abs(net);
-  }
-  int totalEffectiveMoves = currentAbsNet / 2;
-
-  double overallRate = static_cast<double>(totalEffectiveMoves) / events.size();
-  return overallRate <= 0.5 && events.size() > 4;  
+bool PoolRebalancer::checkForThrashing(PoolId pid) const{
+  auto strategy = findRebalanceStrategyForPool(pid);
+  return strategy->checkForThrashing(pid);
 }
 
+double PoolRebalancer::queryEffectiveMoveRate(PoolId pid) const{
+  auto strategy = findRebalanceStrategyForPool(pid);
+  return strategy->queryEffectiveMoveRate(pid);
+}
+
+bool PoolRebalancer::isLastRebalanceThrashing(PoolId pid) const {
+  auto it = lastRebalance_.find(pid);
+  if (it == lastRebalance_.end()) {
+      return false; 
+  }
+  return it->second;
+}
 RebalancerStats PoolRebalancer::getStats() const noexcept {
   RebalancerStats stats;
   stats.numRuns = getRunCount();

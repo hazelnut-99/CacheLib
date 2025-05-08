@@ -398,6 +398,7 @@ class CacheAllocator : public CacheBase {
 
   void clearRebalancerPoolEventMap(PoolId pid);
   bool checkForRebalanceThrashing(PoolId pid);
+  bool isLastRebalanceThrashing(PoolId pid);
   unsigned int getRebalancerPoolEventCount(PoolId pid);
 
   // create a new cache allocation. The allocation can be initialized
@@ -4600,6 +4601,11 @@ void CacheAllocator<CacheTrait>::clearRebalancerPoolEventMap(PoolId pid) {
 template <typename CacheTrait>
 bool CacheAllocator<CacheTrait>::checkForRebalanceThrashing(PoolId pid) {
   return poolRebalancer_->checkForThrashing(pid);
+}
+
+template <typename CacheTrait>
+bool CacheAllocator<CacheTrait>::isLastRebalanceThrashing(PoolId pid) {
+  return poolRebalancer_->isLastRebalanceThrashing(pid);
 }
 
 template <typename CacheTrait>

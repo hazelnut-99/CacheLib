@@ -66,11 +66,15 @@ class PoolRebalancer : public PeriodicWorker {
 
   // Calculate the effective movement rate for a specific pool.
   // The rate is calculated as netEffectiveMoves / queue size.
-  bool checkForThrashing(PoolId pid);
+  bool checkForThrashing(PoolId pid) const;
 
-  unsigned int getRebalanceEventQueueSize(PoolId pid);
+  double queryEffectiveMoveRate(PoolId pid) const;
+
+  unsigned int getRebalanceEventQueueSize(PoolId pid) const;
 
   void processAllocFailure(PoolId pid);
+
+  bool isLastRebalanceThrashing(PoolId pid) const;
 
  private:
   struct LoopStats {
@@ -114,10 +118,7 @@ class PoolRebalancer : public PeriodicWorker {
 
   void releaseSlab(PoolId pid, ClassId victim, ClassId receiver, uint64_t request_id = 0);
 
-  // Add a victim and receiver pair to the deque for a specific pool.
-  // Ensures the deque size does not exceed the maximum size.
-  void addToPoolEventMap(PoolId pid, ClassId victimClassId, ClassId receiverClassId);
-
+  std::shared_ptr<RebalanceStrategy> findRebalanceStrategyForPool(PoolId pid) const;
 
   // cache allocator's interface for rebalancing
   CacheBase& cache_;
@@ -141,6 +142,8 @@ class PoolRebalancer : public PeriodicWorker {
 
   std::unordered_map<PoolId, std::deque<std::pair<ClassId, ClassId>>> poolEventMap_;
   static constexpr size_t kMaxQueueSize = 20;
+
+  std::unordered_map<PoolId, bool> lastRebalance_;
 
   // implements the actual logic of running tryRebalancing and
   // updating the stats

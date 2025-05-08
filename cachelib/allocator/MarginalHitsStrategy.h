@@ -59,13 +59,7 @@ class MarginalHitsStrategy : public RebalanceStrategy {
 
     bool autoDecThreshold{false};
 
-    bool aimdThreshold{false};
-
-    bool useProbablisticDecision{false};
-
-    double normalizedRangeThreshold{0.0};
-
-    unsigned int randomSeed{42};
+    unsigned int thrashingCheckWindowSize{5};
 
     Config() noexcept {}
     explicit Config(double param) noexcept : Config(param, 1, 1) {}
@@ -88,6 +82,32 @@ class MarginalHitsStrategy : public RebalanceStrategy {
       XLOGF(INFO, "Alloc failure, resetting threshold for marginal-hits to 0");
       minDiffInUse_ = 0;
     }
+  }
+
+  bool isThrashing(PoolId pid, RebalanceContext ctx) const {
+    if (!ctx.isEffective()) {
+      return false;
+    }
+    const auto it = recentRebalanceEvents_.find(pid);
+    if (it == recentRebalanceEvents_.end() || it->second.empty()) {
+      return false; 
+    }
+  
+    const auto& events = it->second;
+  
+    const auto config = getConfigCopy();
+  
+  
+    size_t count = 0;
+    for (auto rit = events.rbegin(); rit != events.rend() && count < config.thrashingCheckWindowSize; ++rit, ++count) {
+      const auto& event = *rit;
+      if ((ctx.victimClassId == event.receiverClassId ||
+           ctx.receiverClassId == event.victimClassId)) {
+        return true; 
+      }
+    }
+  
+    return false;
   }
 
   // Doubles the rebalance threshold (minDiff). If minDiff is 0, set it to 1.
@@ -124,8 +144,6 @@ class MarginalHitsStrategy : public RebalanceStrategy {
 
   double computeNormalizedMarginalHitsRange(const std::unordered_map<ClassId, double>& scores, double epsilon = 1e-9) const;
   
-  std::unordered_map<ClassId, double> calculateWeightedMissRateGradients(
-    const CacheBase& cache, PoolId pid, const PoolStats& poolStats);
 
   // pick victim and receiver according to smoothed rankings
   RebalanceContext pickVictimAndReceiverFromRankings(

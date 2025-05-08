@@ -97,9 +97,13 @@ class CacheStressor : public Stressor {
     }
 
     wakeUpRebalancerEveryXReqs_ = cacheConfig.wakeUpRebalancerEveryXReqs;
+    rebalanceIntervalInUse_ = cacheConfig.wakeUpRebalancerEveryXReqs;
     useAdaptiveRebalanceInterval_ = cacheConfig.useAdaptiveRebalanceInterval;
-    useAdaptiveRebalanceIntervalV2_ = cacheConfig.useAdaptiveRebalanceIntervalV2;
+    useAdaptiveRebalanceIntervalV2_ =
+        cacheConfig.useAdaptiveRebalanceIntervalV2;
     increaseIntervalFactor_ = cacheConfig.increaseIntervalFactor;
+
+    intervalAdjustmentStrategy_ = cacheConfig.intervalAdjustmentStrategy;
   
     
     // try disable all async wake-ups
@@ -361,33 +365,20 @@ class CacheStressor : public Stressor {
               std::map<PoolId, std::map<ClassId, uint64_t>> getDelta = cache_->fetchAcCacheGetDelta();
               std::map<PoolId, std::map<ClassId, uint64_t>> missDelta = cache_->fetchAcCacheGetMissDelta();
 
-              uint64_t currentMissDeltaSum = 0;
-              for (const auto& [poolId, classMap] : missDelta) {
-                for (const auto& [classId, missDeltaValue] : classMap) {
-                  currentMissDeltaSum += missDeltaValue;
-                }
-              }
-
-              XLOGF(DBG, "Miss count from the simulator, Miss Delta Sum: {}, index: {}", currentMissDeltaSum, i);
-
+              
               uint64_t totalGetDelta = 0;
               uint64_t totalMissDelta = 0;
-
-              // Sum the values in getDelta
               for (const auto& [poolId, classMap] : getDelta) {
                   for (const auto& [classId, getDeltaValue] : classMap) {
                       totalGetDelta += getDeltaValue;
                   }
               }
-
-              // Sum the values in missDelta
               for (const auto& [poolId, classMap] : missDelta) {
                   for (const auto& [classId, missDeltaValue] : classMap) {
                       totalMissDelta += missDeltaValue;
                   }
               }
 
-              // Calculate the miss ratio
               double missRatio = totalGetDelta > 0 ? static_cast<double>(totalMissDelta) / totalGetDelta : 0.0;
 
               // Log the result in JSON format
@@ -407,46 +398,71 @@ class CacheStressor : public Stressor {
                         poolId, classId, getDeltaValue, missDeltaValue);
                   }
               }
-
-          double mean = calculateMean(lastTenMissDeltaSums_);
-          double stddev = calculateStdDev(lastTenMissDeltaSums_, mean);
-          //XLOGF(INFO, "Miss count from the simulator, Current: {}, Mean: {}, StdDev: {}, index: {}, z: {}", currentMissDeltaSum, mean, stddev, i, (currentMissDeltaSum - mean) / stddev);
-          if (useAdaptiveRebalanceIntervalV2_ && lastTenMissDeltaSums_.size() == 30) { 
-            if (currentMissDeltaSum >= (mean + (stddev * 3))) {
-              ++consecutiveMissDeltaSurgeCount_;
-              if (consecutiveMissDeltaSurgeCount_ == 2) {
-                XLOGF(INFO, "Detected consecutive surges in misses, resetting rebalance interval to {}", wakeUpRebalancerEveryXReqs_);
-                rebalanceIntervalTimes_ = 1;
-                consecutiveMissDeltaSurgeCount_ = 0; // Reset the counter after acting
-              }
-            } else {
-              consecutiveMissDeltaSurgeCount_ = 0; // Reset the counter if the condition is not met
-            }
-          
-          } 
             
-          auto index = i / wakeUpRebalancerEveryXReqs_;
-          if(index % rebalanceIntervalTimes_ == 0) {
+        }
 
-            cache_->wakeupPoolRebalancer(i);
-          
-            if (useAdaptiveRebalanceInterval_ || useAdaptiveRebalanceIntervalV2_) {
-              bool thrashingDected = cache_->checkForRebalanceThrashing(pid);
-              auto rebalanceEventCount = cache_->getRebalancerPoolEventCount(pid);
-              if (thrashingDected) {
-                XLOGF(INFO, "Effective movement rate is low, increasing "
-                          "the rebalance interval, from {} : {}", wakeUpRebalancerEveryXReqs_ * rebalanceIntervalTimes_, wakeUpRebalancerEveryXReqs_ * rebalanceIntervalTimes_ * increaseIntervalFactor_);
-                rebalanceIntervalTimes_ *= increaseIntervalFactor_;
-                cache_->clearRebalancerPoolEventMap(pid);
-              }
+        if((i - lastRebalanceTime_) == rebalanceIntervalInUse_) {
+
+          cache_->wakeupPoolRebalancer(i);
+          lastRebalanceTime_ = i;
+        
+          if (useAdaptiveRebalanceInterval_) {
+            bool thrashingDected = cache_->checkForRebalanceThrashing(pid);
+            auto rebalanceEventCount = cache_->getRebalancerPoolEventCount(pid);
+            if (thrashingDected) {
+              XLOGF(INFO, "Effective movement rate is low, increasing "
+                        "the rebalance interval, from {} : {}", rebalanceIntervalInUse_, rebalanceIntervalInUse_ * increaseIntervalFactor_);
+              rebalanceIntervalInUse_ *= increaseIntervalFactor_;
+              cache_->clearRebalancerPoolEventMap(pid);
             }
           }
+
+
+          if (useAdaptiveRebalanceIntervalV2_) {
+            bool thrashingDetected = cache_->isLastRebalanceThrashing(pid);
           
+            const auto oldInterval = rebalanceIntervalInUse_;
+            const auto additiveStep = wakeUpRebalancerEveryXReqs_;
+            const auto factor = increaseIntervalFactor_;
           
-          if (lastTenMissDeltaSums_.size() == 30) {
-            lastTenMissDeltaSums_.pop_front(); 
+            if (intervalAdjustmentStrategy_ == "mimd") {
+              if (thrashingDetected) {
+                rebalanceIntervalInUse_ *= factor;
+              } else {
+                rebalanceIntervalInUse_ = std::max(rebalanceIntervalInUse_ / factor, additiveStep);
+              }
+          
+            } else if (intervalAdjustmentStrategy_ == "miad") {
+              if (thrashingDetected) {
+                rebalanceIntervalInUse_ *= factor;
+              } else {
+                rebalanceIntervalInUse_ = std::max(rebalanceIntervalInUse_ - additiveStep, additiveStep);
+              }
+          
+            } else if (intervalAdjustmentStrategy_ == "aimd") {
+              if (thrashingDetected) {
+                rebalanceIntervalInUse_ += additiveStep;
+              } else {
+                rebalanceIntervalInUse_ = std::max(rebalanceIntervalInUse_ / factor, additiveStep);
+              }
+          
+            } else if (intervalAdjustmentStrategy_ == "aiad") {
+              if (thrashingDetected) {
+                rebalanceIntervalInUse_ += additiveStep;
+              } else {
+                rebalanceIntervalInUse_ = std::max(rebalanceIntervalInUse_ - additiveStep, additiveStep);
+              }
+          
+            } else {
+              XLOGF(ERR, "Unknown intervalAdjustmentStrategy_: {}", intervalAdjustmentStrategy_);
+            }
+          
+            if (rebalanceIntervalInUse_ != oldInterval) {
+              XLOGF(INFO, "Rebalance interval adjusted due to {}thrashing: from {} to {} using strategy '{}'",
+                    thrashingDetected ? "" : "non-", oldInterval, rebalanceIntervalInUse_, intervalAdjustmentStrategy_);
+            }
           }
-          lastTenMissDeltaSums_.push_back(currentMissDeltaSum);
+        
         }
 
         OpType op = req.getOp();
@@ -685,35 +701,6 @@ class CacheStressor : public Stressor {
     }
   }
 
-  double calculateMean(const std::deque<uint64_t>& values) {
-    if (values.empty()) {
-      return 0.0;
-    }
-    double sum = 0.0;
-    for (const auto& value : values) {
-      sum += value;
-    }
-    return sum / values.size();
-  }
-  
-  double calculateStdDev(const std::deque<uint64_t>& values, double mean) {
-    if (values.size() <= 1) {
-      return 0.0;
-    }
-    double variance = 0.0;
-    for (const auto& value : values) {
-      variance += (value - mean) * (value - mean);
-    }
-    return std::sqrt(variance / (values.size() - 1));
-  }
-
-  uint64_t calculateMax(const std::deque<uint64_t>& values) {
-    if (values.empty()) {
-      return 0; // Return 0 if the deque is empty
-    }
-    return *std::max_element(values.begin(), values.end());
-  }
-
   const StressorConfig config_; // config for the stress run
 
   std::vector<ThroughputStats> throughputStats_; // thread local stats
@@ -762,7 +749,7 @@ class CacheStressor : public Stressor {
 
   uint64_t wakeUpRebalancerEveryXReqs_;
 
-  uint64_t rebalanceIntervalTimes_{1};
+  uint64_t rebalanceIntervalInUse_;
 
   bool useAdaptiveRebalanceInterval_;
 
@@ -770,9 +757,9 @@ class CacheStressor : public Stressor {
 
   unsigned int increaseIntervalFactor_;
 
-  std::deque<uint64_t> lastTenMissDeltaSums_;
+  uint64_t lastRebalanceTime_{0}; 
 
-  uint64_t consecutiveMissDeltaSurgeCount_{0};
+  std::string intervalAdjustmentStrategy_{"mimd"};
 };
 } // namespace cachebench
 } // namespace cachelib

@@ -96,15 +96,17 @@ class RebalanceStrategy {
 
   double getMinDiffValueFromRebalanceEvents(PoolId pid) const;
 
-  double getMedianNormalizedRangeFromRebalanceEvents(PoolId pid) const;
-
   unsigned int getRebalanceEventQueueSize(PoolId pid) const;
 
   void clearPoolRebalanceEvent(PoolId pid);
 
-  bool checkForThrashing(PoolId pid);
+  bool checkForThrashing(PoolId pid) const;
 
-  double queryEffectiveMoveRate(PoolId pid);
+  virtual bool isThrashing(PoolId pid, RebalanceContext ctx) const {
+    return false; 
+  }
+
+  double queryEffectiveMoveRate(PoolId pid) const;
 
  protected:
   using PoolState = std::array<detail::Info, MemoryAllocator::kMaxClasses>;
@@ -187,6 +189,8 @@ class RebalanceStrategy {
                                      size_t threshold,
                                      const PoolState& prevState);
 
+  std::unordered_map<PoolId, std::deque<RebalanceContext>> recentRebalanceEvents_;
+
  private:
   // picks any of the class id ordered by the total slabs.
   ClassId pickAnyClassIdForResizing(const CacheBase& cache,
@@ -221,7 +225,6 @@ class RebalanceStrategy {
 
   Type type_ = PickNothingOrTest;
 
-  std::unordered_map<PoolId, std::deque<RebalanceContext>> recentRebalanceEvents_;
   static constexpr size_t kMaxQueueSize = 20;
 
   // maintain the state of the previous snapshot of pool for every pool.  We
