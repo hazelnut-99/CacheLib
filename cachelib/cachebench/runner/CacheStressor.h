@@ -37,6 +37,7 @@
 #include "cachelib/cachebench/util/Parallel.h"
 #include "cachelib/cachebench/util/Request.h"
 #include "cachelib/cachebench/workload/GeneratorBase.h"
+#include "cachelib/common/DistributionAnomalyDetector.h"
 
 typedef void (*set_mock_time_t)(time_t, long);
 
@@ -102,6 +103,10 @@ class CacheStressor : public Stressor {
     useAdaptiveRebalanceIntervalV2_ =
         cacheConfig.useAdaptiveRebalanceIntervalV2;
     increaseIntervalFactor_ = cacheConfig.increaseIntervalFactor;
+    rebalancerDisabled_ = (cacheConfig.rebalanceStrategy == "disabled");
+    useAnomalyDetection_ = cacheConfig.useAnomalyDetection;
+
+    detector_ = DistributionAnomalyDetector(3, 30, false);
 
     intervalAdjustmentStrategy_ = cacheConfig.intervalAdjustmentStrategy;
   
@@ -111,6 +116,8 @@ class CacheStressor : public Stressor {
       cacheConfig.poolRebalanceIntervalSec = 31104000; // 1 year
       cacheConfig.poolRebalancerDisableForcedWakeUp = true;
     }
+
+
 
     if (cacheConfig.useTraceTimeStamp &&
         cacheConfig.tickerSynchingSeconds > 0) {
@@ -398,11 +405,55 @@ class CacheStressor : public Stressor {
                         poolId, classId, getDeltaValue, missDeltaValue);
                   }
               }
+
+              auto rawStats = cache_->getPoolDeltaStats(pid);
+
+              auto statsToDynamic = [](const std::map<ClassId, double>& stats) {
+                  folly::dynamic result = folly::dynamic::object;
+                  for (const auto& [classId, value] : stats) {
+                      result[folly::to<std::string>(classId)] = value;
+                  }
+                  return result;
+              };
+
+              folly::dynamic jsonStats = folly::dynamic::object;
+              constexpr std::array<const char*, 8> metrics = {
+                  "normalizedMarginalHits",
+                  "normalizedHits", 
+                  "normalizedEvictions",
+                  "normalizedHitsPerSlab",
+                  "marginalHits",
+                  "hits",
+                  "evictions",
+                  "hitsPerSlab"
+              };
+              
+              for (const auto& metric : metrics) {
+                  auto it = rawStats.find(metric);
+                  if (it != rawStats.end()) {
+                      jsonStats[metric] = statsToDynamic(it->second);
+                  }
+              }
             
+              if (!jsonStats.empty()) {
+                  XLOGF(DBG, "Delta_statistics_logging: {}", folly::toJson(jsonStats));
+              }
+
+              if (!rawStats.empty() && rawStats.find("normalizedHits") != rawStats.end()) {
+                bool anomaly = detector_.update(rawStats["normalizedHits"]);
+                if(anomaly && useAnomalyDetection_ && (i - lastRebalanceTime_) > 2 * wakeUpRebalancerEveryXReqs_) {
+                    const auto oldInterval = rebalanceIntervalInUse_;
+                    rebalanceIntervalInUse_ = wakeUpRebalancerEveryXReqs_;
+                    XLOGF(INFO, "Rebalance interval adjusted due to distribution anomaly: from {} to {}, interval: {}", oldInterval, rebalanceIntervalInUse_, (i - lastRebalanceTime_));
+                    cache_->clearRebalancerPoolEventMap(pid);
+                }
+              }
+
         }
 
-        if((i - lastRebalanceTime_) == rebalanceIntervalInUse_) {
+      
 
+        if((i - lastRebalanceTime_) >= rebalanceIntervalInUse_ && !rebalancerDisabled_) {
           cache_->wakeupPoolRebalancer(i);
           lastRebalanceTime_ = i;
         
@@ -757,9 +808,15 @@ class CacheStressor : public Stressor {
 
   unsigned int increaseIntervalFactor_;
 
+  bool useAnomalyDetection_{false};
+
   uint64_t lastRebalanceTime_{0}; 
 
+  bool rebalancerDisabled_{false};
+
   std::string intervalAdjustmentStrategy_{"mimd"};
+
+  DistributionAnomalyDetector detector_;
 };
 } // namespace cachebench
 } // namespace cachelib

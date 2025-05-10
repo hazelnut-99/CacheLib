@@ -399,6 +399,7 @@ class CacheAllocator : public CacheBase {
   void clearRebalancerPoolEventMap(PoolId pid);
   bool checkForRebalanceThrashing(PoolId pid);
   bool isLastRebalanceThrashing(PoolId pid);
+  std::map<std::string, std::map<ClassId, double>>  getPoolDeltaStats(PoolId pid);
   unsigned int getRebalancerPoolEventCount(PoolId pid);
 
   // create a new cache allocation. The allocation can be initialized
@@ -4606,6 +4607,12 @@ bool CacheAllocator<CacheTrait>::checkForRebalanceThrashing(PoolId pid) {
 template <typename CacheTrait>
 bool CacheAllocator<CacheTrait>::isLastRebalanceThrashing(PoolId pid) {
   return poolRebalancer_->isLastRebalanceThrashing(pid);
+}
+
+template <typename CacheTrait>
+std::map<std::string, std::map<ClassId, double>> CacheAllocator<CacheTrait>::getPoolDeltaStats(
+    PoolId pid) {
+  return poolRebalancer_->getPoolDeltaStats(pid);
 }
 
 template <typename CacheTrait>

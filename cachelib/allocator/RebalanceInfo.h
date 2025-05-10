@@ -232,7 +232,7 @@ struct Info {
     evictions = cacheStats.numEvictions();
 
     // update tail hits
-    //accuTailHits = cacheStats.containerStat.numTailAccesses;
+    accuTailHits = cacheStats.containerStat.numTailAccesses;
 
     accuColdHits = cacheStats.containerStat.numColdAccesses;
 

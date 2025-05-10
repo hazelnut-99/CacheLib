@@ -385,4 +385,79 @@ T RebalanceStrategy::executeAndRecordCurrentState(
   return rv;
 }
 
+
+#include <folly/logging/xlog.h>
+#include <fmt/format.h>
+
+std::map<std::string, std::map<ClassId, double>> RebalanceStrategy::getPoolDeltaStats(
+    const CacheBase& cache, PoolId pid) {
+    const auto poolStats = cache.getPoolStats(pid);
+
+    // Early returns for uninitialized or unallocated pools
+    if (!poolStatePresent(pid)) {
+      initPoolState(pid, poolStats);
+      return {};
+    }
+
+    if (!cache.getPool(pid).allSlabsAllocated()) {
+      recordCurrentState(pid, poolStats);
+      return {};
+    }
+
+    auto classesSet = poolStats.getClassIds();
+    auto& poolState = getPoolState(pid);
+    std::map<std::string, std::map<ClassId, double>> statsMap;
+
+    // First pass: collect raw stats
+    for (const auto& classId : classesSet) {
+      const auto& rebalanceInfo = poolState.at(classId);
+      statsMap["marginalHits"][classId] = rebalanceInfo.getMarginalHits(poolStats, 1);
+      statsMap["hits"][classId] = rebalanceInfo.deltaHits(poolStats);
+      statsMap["evictions"][classId] = rebalanceInfo.getDeltaEvictions(poolStats);
+      statsMap["hitsPerSlab"][classId] = poolStats.numSlabsForClass(classId) > 0 ? rebalanceInfo.deltaHitsPerSlab(poolStats) : 0;
+    }
+
+    // Second pass: normalize each metric
+    auto normalize = [](const std::map<ClassId, double>& input, double epsilon = 1.0) {
+      std::map<ClassId, double> result;
+      if (input.empty()) return result;
+
+      double sum = 0.0;
+      for (const auto& [classId, value] : input) {
+        sum += value + epsilon;
+      }
+
+      if (sum == input.size() * epsilon) {
+        double uniform = 1.0 / input.size();
+        for (const auto& [classId, _] : input) {
+          result[classId] = uniform;
+        }
+      } else {
+        for (const auto& [classId, value] : input) {
+          result[classId] = (value + epsilon) / sum;
+        }
+      }
+      return result;
+    };
+
+    // Normalize each metric
+    auto normalizedMarginalHits = normalize(statsMap["marginalHits"]);
+    auto normalizedHits = normalize(statsMap["hits"]);
+    auto normalizedEvictions = normalize(statsMap["evictions"]);
+    auto normalizedHitsPerSlab = normalize(statsMap["hitsPerSlab"]);
+
+
+    recordCurrentState(pid, poolStats);
+    
+    // Return both raw and normalized stats in the map
+    statsMap["normalizedMarginalHits"] = std::move(normalizedMarginalHits);
+    statsMap["normalizedHits"] = std::move(normalizedHits);
+    statsMap["normalizedEvictions"] = std::move(normalizedEvictions);
+    statsMap["normalizedHitsPerSlab"] = std::move(normalizedHitsPerSlab);
+    
+    return statsMap;
+}
+
+
+
 } // namespace facebook::cachelib

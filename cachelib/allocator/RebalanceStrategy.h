@@ -86,6 +86,8 @@ class RebalanceStrategy {
   // used mostly for pool resizing.
   ClassId pickVictimForResizing(const CacheBase& cache, PoolId pid);
 
+  std::map<std::string, std::map<ClassId, double>> getPoolDeltaStats(const CacheBase& cache, PoolId pid);
+
   virtual void updateConfig(const BaseConfig&) {}
 
   Type getType() const { return type_; }

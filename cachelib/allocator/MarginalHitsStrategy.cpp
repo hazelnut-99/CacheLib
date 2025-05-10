@@ -172,12 +172,6 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     }
   }
 
-  if (!config.onlyUpdateHitsIfRebalance || ctx.isEffective()) {
-    for (const auto i : poolStats.getClassIds()) {
-      poolState[i].updateTailHits(poolStats);
-    }
-  }
-
   for (const auto i : poolStats.getClassIds()) {
     poolState[i].updateHits(poolStats);
   }

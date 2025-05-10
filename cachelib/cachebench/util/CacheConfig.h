@@ -81,6 +81,7 @@ struct CacheConfig : public JSONConfig {
   unsigned int increaseIntervalFactor{2};
   bool useAdaptiveRebalanceInterval{false};
   bool useAdaptiveRebalanceIntervalV2{false};
+  bool useAnomalyDetection{false};
 
   std::string intervalAdjustmentStrategy;
   
@@ -118,7 +119,7 @@ struct CacheConfig : public JSONConfig {
   bool mhDecayWithHits{false};
   bool moveOnSlabRelease{false};
 
-  bool mhOnlyUpdateHitsIfRebalance{false};
+
   bool mhAutoDecThreshold{false};
   bool mhAutoIncThreshold{false};
 

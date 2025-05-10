@@ -53,8 +53,6 @@ class MarginalHitsStrategy : public RebalanceStrategy {
 
     bool decayWithHits{false};
 
-    bool onlyUpdateHitsIfRebalance{false};
-
     bool autoIncThreshold{false};
 
     bool autoDecThreshold{false};

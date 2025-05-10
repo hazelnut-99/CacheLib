@@ -76,6 +76,8 @@ class PoolRebalancer : public PeriodicWorker {
 
   bool isLastRebalanceThrashing(PoolId pid) const;
 
+  std::map<std::string, std::map<ClassId, double>> getPoolDeltaStats(PoolId pid);
+
  private:
   struct LoopStats {
     // record the count and the time taken
@@ -124,6 +126,8 @@ class PoolRebalancer : public PeriodicWorker {
   CacheBase& cache_;
 
   std::shared_ptr<RebalanceStrategy> defaultStrategy_{nullptr};
+
+  std::shared_ptr<RebalanceStrategy> monitorStrategy_{nullptr};
 
   // Free alloc threshold to trigger freeing slabs in an allocation
   // class. This threshold for ratio of number

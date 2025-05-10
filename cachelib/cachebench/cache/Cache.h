@@ -347,6 +347,10 @@ class Cache {
     return cache_->isLastRebalanceThrashing(pid);
   }
 
+  std::map<std::string, std::map<ClassId, double>> getPoolDeltaStats(PoolId pid) {
+    return cache_->getPoolDeltaStats(pid);
+  }
+
   unsigned int getRebalancerPoolEventCount(PoolId pid){
     return cache_->getRebalancerPoolEventCount(pid);
   }
@@ -566,7 +570,9 @@ Cache<Allocator>::Cache(const CacheConfig& config,
       nandBytesBegin_{fetchNandWrites()},
       itemRecords_(config_.enableItemDestructorCheck) {
   constexpr size_t MB = 1024ULL * 1024ULL;
-
+  
+  // for now do this for every one
+  //allocatorConfig_.enableTailHitsTracking();
   if (config_.rebalanceStrategy == "marginal-hits" || config_.rebalanceStrategy == "hits-per-tail-slab") {
     allocatorConfig_.enableTailHitsTracking();
   }
@@ -852,10 +858,10 @@ Cache<Allocator>::Cache(const CacheConfig& config,
     }
   }
 
-  if (config_.rebalanceStrategy == "disabled") {
-    XLOG(INFO, "Cachebench: disabling pool rebalancer");
-    cache_->stopPoolRebalancer(std::chrono::seconds(0));
-  }
+  // if (config_.rebalanceStrategy == "disabled") {
+  //   XLOG(INFO, "Cachebench: disabling pool rebalancer");
+  //   cache_->stopPoolRebalancer(std::chrono::seconds(0));
+  // }
 
   if (config_.cacheMonitorFactory) {
     monitor_ = config_.cacheMonitorFactory->create(*cache_);

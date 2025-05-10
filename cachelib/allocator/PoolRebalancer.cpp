@@ -28,6 +28,7 @@ PoolRebalancer::PoolRebalancer(CacheBase& cache,
                                unsigned int freeAllocThreshold)
     : cache_(cache),
       defaultStrategy_(std::move(strategy)),
+      monitorStrategy_(std::make_shared<RebalanceStrategy>()),
       freeAllocThreshold_(freeAllocThreshold) {
   if (!defaultStrategy_) {
     throw std::invalid_argument("The default rebalance strategy is not set.");
@@ -208,6 +209,11 @@ bool PoolRebalancer::isLastRebalanceThrashing(PoolId pid) const {
   }
   return it->second;
 }
+
+std::map<std::string, std::map<ClassId, double>> PoolRebalancer::getPoolDeltaStats(PoolId pid) {
+  return monitorStrategy_->getPoolDeltaStats(cache_, pid);
+}
+
 RebalancerStats PoolRebalancer::getStats() const noexcept {
   RebalancerStats stats;
   stats.numRuns = getRunCount();
