@@ -38,6 +38,7 @@
 #include "cachelib/cachebench/util/Request.h"
 #include "cachelib/cachebench/workload/GeneratorBase.h"
 #include "cachelib/common/DistributionAnomalyDetector.h"
+#include "cachelib/common/EWMA.h"
 
 typedef void (*set_mock_time_t)(time_t, long);
 
@@ -91,13 +92,14 @@ class CacheStressor : public Stressor {
     // this needs to happen befor cache is created
     if (config_.useTraceTimer) {
       XLOG(INFO) << "Using trace timer";
-      mockTimerHandle_ = dlopen("/users/Hongshu/libmock_time.so", RTLD_LAZY);
+      mockTimerHandle_ = dlopen("/mydata/hongshu/libmock_time.so", RTLD_LAZY);
       setMockTimeFunc_ =
           (set_mock_time_t)dlsym(mockTimerHandle_, "set_mock_time");
       setMockTimeFunc_(0, 0);
     }
 
     wakeUpRebalancerEveryXReqs_ = cacheConfig.wakeUpRebalancerEveryXReqs;
+    anomalyDetectionFrequency_ = cacheConfig.anomalyDetectionFrequency;
     rebalanceIntervalInUse_ = cacheConfig.wakeUpRebalancerEveryXReqs;
     useAdaptiveRebalanceInterval_ = cacheConfig.useAdaptiveRebalanceInterval;
     useAdaptiveRebalanceIntervalV2_ =
@@ -105,8 +107,11 @@ class CacheStressor : public Stressor {
     increaseIntervalFactor_ = cacheConfig.increaseIntervalFactor;
     rebalancerDisabled_ = (cacheConfig.rebalanceStrategy == "disabled");
     useAnomalyDetection_ = cacheConfig.useAnomalyDetection;
+    resetIntervalTimings_ = splitStringToIntSet(cacheConfig.resetIntervalTimings);
 
     detector_ = DistributionAnomalyDetector(3, 30, false);
+    ewma_ = EWMA(0.5, 3.5);
+    ewmaDelta_ = EWMA(0.5, 3.5);
 
     intervalAdjustmentStrategy_ = cacheConfig.intervalAdjustmentStrategy;
   
@@ -367,8 +372,8 @@ class CacheStressor : public Stressor {
           setMockTimeFunc_(req.timestamp, 0);
         }
 
-        if (wakeUpRebalancerEveryXReqs_ > 0 &&
-            i % wakeUpRebalancerEveryXReqs_ == 0) {
+        if (anomalyDetectionFrequency_ > 0 &&
+            i % anomalyDetectionFrequency_ == 0) {
               std::map<PoolId, std::map<ClassId, uint64_t>> getDelta = cache_->fetchAcCacheGetDelta();
               std::map<PoolId, std::map<ClassId, uint64_t>> missDelta = cache_->fetchAcCacheGetMissDelta();
 
@@ -417,15 +422,19 @@ class CacheStressor : public Stressor {
               };
 
               folly::dynamic jsonStats = folly::dynamic::object;
-              constexpr std::array<const char*, 8> metrics = {
+              constexpr std::array<const char*, 12> metrics = {
                   "normalizedMarginalHits",
                   "normalizedHits", 
                   "normalizedEvictions",
                   "normalizedHitsPerSlab",
+                  "normalizedMissEstimation",
+                  "normalizedTailAge",  
+                  "tailAge",
                   "marginalHits",
                   "hits",
                   "evictions",
-                  "hitsPerSlab"
+                  "hitsPerSlab",
+                  "missEstimation"
               };
               
               for (const auto& metric : metrics) {
@@ -439,16 +448,25 @@ class CacheStressor : public Stressor {
                   XLOGF(DBG, "Delta_statistics_logging: {}", folly::toJson(jsonStats));
               }
 
-              if (!rawStats.empty() && rawStats.find("normalizedHits") != rawStats.end()) {
-                bool anomaly = detector_.update(rawStats["normalizedHits"]);
-                if(anomaly && useAnomalyDetection_ && (i - lastRebalanceTime_) > 2 * wakeUpRebalancerEveryXReqs_) {
+              if (!rawStats.empty() && rawStats.find("marginalHits") != rawStats.end()) {
+                double cv = coefficientOfVariation(rawStats["marginalHits"]);
+                bool anomaly1 = ewma_.update(cv);
+                bool anomaly2 = ewmaDelta_.update(cv - lastCV_);
+                if((anomaly1 || anomaly2) && useAnomalyDetection_) {
                     const auto oldInterval = rebalanceIntervalInUse_;
                     rebalanceIntervalInUse_ = wakeUpRebalancerEveryXReqs_;
-                    XLOGF(INFO, "Rebalance interval adjusted due to distribution anomaly: from {} to {}, interval: {}", oldInterval, rebalanceIntervalInUse_, (i - lastRebalanceTime_));
+                    XLOGF(INFO, "Rebalance interval adjusted due to anomaly: from {} to {}, request_id: {}", oldInterval, rebalanceIntervalInUse_, i);
                     cache_->clearRebalancerPoolEventMap(pid);
                 }
+                lastCV_ = cv;
               }
 
+        }
+
+        if(resetIntervalTimings_.count(i) > 0) {
+          XLOGF(INFO, "Resetting interval timings at i = {}", i);
+          rebalanceIntervalInUse_ = wakeUpRebalancerEveryXReqs_;
+          cache_->clearRebalancerPoolEventMap(pid);
         }
 
       
@@ -752,6 +770,48 @@ class CacheStressor : public Stressor {
     }
   }
 
+  std::set<unsigned int> splitStringToIntSet(const std::string& input) {
+    std::set<unsigned int> result;
+    std::stringstream ss(input);
+    std::string item;
+
+    while (std::getline(ss, item, ',')) {
+        try {
+            result.insert(std::stoi(item));
+        } catch (const std::invalid_argument& e) {
+            std::cerr << "Invalid integer: " << item << '\n';
+        }
+    }
+
+    return result;
+}
+
+double coefficientOfVariation(const std::map<ClassId, double>& values) {
+  if (values.empty()) {
+      return 0.0; 
+  }
+
+  std::vector<double> extractedValues;
+  for (const auto& [classId, value] : values) {
+      extractedValues.push_back(value);
+  }
+
+  double sum = std::accumulate(extractedValues.begin(), extractedValues.end(), 0.0);
+  double mean = sum / extractedValues.size();
+
+  if (mean == 0.0) {
+      return 0.0; // Avoid division by zero
+  }
+
+  double variance = std::accumulate(extractedValues.begin(), extractedValues.end(), 0.0,
+      [mean](double acc, double value) {
+          return acc + std::pow(value - mean, 2);
+      }) / extractedValues.size();
+  double stdDev = std::sqrt(variance);
+
+  return stdDev / mean;
+}
+
   const StressorConfig config_; // config for the stress run
 
   std::vector<ThroughputStats> throughputStats_; // thread local stats
@@ -800,6 +860,8 @@ class CacheStressor : public Stressor {
 
   uint64_t wakeUpRebalancerEveryXReqs_;
 
+  uint64_t anomalyDetectionFrequency_{0};
+
   uint64_t rebalanceIntervalInUse_;
 
   bool useAdaptiveRebalanceInterval_;
@@ -816,7 +878,15 @@ class CacheStressor : public Stressor {
 
   std::string intervalAdjustmentStrategy_{"mimd"};
 
+  double lastCV_{0.0};
+
   DistributionAnomalyDetector detector_;
+
+  EWMA ewma_;
+
+  EWMA ewmaDelta_;
+
+  std::set<unsigned int> resetIntervalTimings_;
 };
 } // namespace cachebench
 } // namespace cachelib

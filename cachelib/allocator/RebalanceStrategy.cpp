@@ -341,7 +341,7 @@ bool RebalanceStrategy::checkForThrashing(PoolId pid) const{
 
   double overallRate = queryEffectiveMoveRate(pid);
   // todo make these criterion configurable
-  return overallRate <= 0.5 && events.size() > 4;  
+  return overallRate < 0.5;  
 }
 
 
@@ -406,6 +406,7 @@ std::map<std::string, std::map<ClassId, double>> RebalanceStrategy::getPoolDelta
 
     auto classesSet = poolStats.getClassIds();
     auto& poolState = getPoolState(pid);
+    const auto poolEvictionAgeStats = cache.getPoolEvictionAgeStats(pid, 0);
     std::map<std::string, std::map<ClassId, double>> statsMap;
 
     // First pass: collect raw stats
@@ -415,6 +416,8 @@ std::map<std::string, std::map<ClassId, double>> RebalanceStrategy::getPoolDelta
       statsMap["hits"][classId] = rebalanceInfo.deltaHits(poolStats);
       statsMap["evictions"][classId] = rebalanceInfo.getDeltaEvictions(poolStats);
       statsMap["hitsPerSlab"][classId] = poolStats.numSlabsForClass(classId) > 0 ? rebalanceInfo.deltaHitsPerSlab(poolStats) : 0;
+      statsMap["missEstimation"][classId] = rebalanceInfo.deltaHits(poolStats) + rebalanceInfo.getDeltaEvictions(poolStats);
+      statsMap["tailAge"][classId] = poolEvictionAgeStats.getOldestElementAge(classId);
     }
 
     // Second pass: normalize each metric
@@ -445,15 +448,25 @@ std::map<std::string, std::map<ClassId, double>> RebalanceStrategy::getPoolDelta
     auto normalizedHits = normalize(statsMap["hits"]);
     auto normalizedEvictions = normalize(statsMap["evictions"]);
     auto normalizedHitsPerSlab = normalize(statsMap["hitsPerSlab"]);
+    auto normalizedMissEstimation = normalize(statsMap["missEstimation"]);
+    auto normalizedTailAge = normalize(statsMap["tailAge"]);
 
 
     recordCurrentState(pid, poolStats);
+
+    // additionally, hits needs to be updated
+    for (const auto i : poolStats.getClassIds()) {
+      poolState[i].updateHits(poolStats);
+      poolState[i].updateTailHits(poolStats);
+    }
     
     // Return both raw and normalized stats in the map
     statsMap["normalizedMarginalHits"] = std::move(normalizedMarginalHits);
     statsMap["normalizedHits"] = std::move(normalizedHits);
     statsMap["normalizedEvictions"] = std::move(normalizedEvictions);
     statsMap["normalizedHitsPerSlab"] = std::move(normalizedHitsPerSlab);
+    statsMap["normalizedMissEstimation"] = std::move(normalizedMissEstimation);
+    statsMap["normalizedTailAge"] = std::move(normalizedTailAge);
     
     return statsMap;
 }

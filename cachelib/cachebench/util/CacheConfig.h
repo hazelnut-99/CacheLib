@@ -78,14 +78,14 @@ struct CacheConfig : public JSONConfig {
   unsigned int poolRebalancerFreeAllocThreshold{0};
   bool poolRebalancerDisableForcedWakeUp{false};
   uint64_t wakeUpRebalancerEveryXReqs{0};
+  uint64_t anomalyDetectionFrequency{100000};
   unsigned int increaseIntervalFactor{2};
   bool useAdaptiveRebalanceInterval{false};
   bool useAdaptiveRebalanceIntervalV2{false};
   bool useAnomalyDetection{false};
 
   std::string intervalAdjustmentStrategy;
-  
-  
+
   std::string rebalanceStrategy;
 
   // common to all strategies
@@ -111,14 +111,21 @@ struct CacheConfig : public JSONConfig {
   double mhMinDiffRatio{0};
   double mhMovingAverageParam{0.3};
   unsigned int mhMaxFreeMemSlabs{1};
+  std::string mhOnlineLearningModel{"SGD"};
+  bool mhOnlyUpdateHitIfRebalance{false};
+  std::string resetIntervalTimings{""};
+
+  unsigned int mhMinModelSampleSize{30};
+  unsigned int mhBufferSize{30};
+
   bool mhEnableHoldOff{false};
   bool countColdTailHitsOnly{false};
   unsigned int tailSlabCnt{1};
   bool enableShardsMrc{false};
   bool mhFilterReceiverByEvictionRate{false};
   bool mhDecayWithHits{false};
+  bool mhEnableOnlineLearning{false};
   bool moveOnSlabRelease{false};
-
 
   bool mhAutoDecThreshold{false};
   bool mhAutoIncThreshold{false};

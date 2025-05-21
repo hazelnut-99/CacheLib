@@ -35,6 +35,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, poolRebalancerFreeAllocThreshold);
   JSONSetVal(configJson, poolRebalancerDisableForcedWakeUp);
   JSONSetVal(configJson, wakeUpRebalancerEveryXReqs);
+  JSONSetVal(configJson, anomalyDetectionFrequency);
   JSONSetVal(configJson, useAdaptiveRebalanceInterval);
   JSONSetVal(configJson, useAdaptiveRebalanceIntervalV2);
   JSONSetVal(configJson, useAnomalyDetection);
@@ -57,7 +58,11 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, fmNumFreeSlabs);
   JSONSetVal(configJson, fmMaxUnAllocatedSlabs);
 
+  JSONSetVal(configJson, mhOnlyUpdateHitIfRebalance);
   JSONSetVal(configJson, mhMovingAverageParam);
+  JSONSetVal(configJson, mhEnableOnlineLearning);
+  JSONSetVal(configJson, mhOnlineLearningModel);
+  JSONSetVal(configJson, resetIntervalTimings);
   JSONSetVal(configJson, mhMaxFreeMemSlabs);
   JSONSetVal(configJson, mhEnableHoldOff);
   JSONSetVal(configJson, mhMinDiff);
@@ -69,6 +74,8 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, mhDecayWithHits);
   JSONSetVal(configJson, mhAutoDecThreshold);
   JSONSetVal(configJson, mhAutoIncThreshold);
+  JSONSetVal(configJson, mhMinModelSampleSize);
+  JSONSetVal(configJson, mhBufferSize);
 
 
   JSONSetVal(configJson, htBucketPower);
@@ -153,7 +160,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   // if you added new fields to the configuration, update the JSONSetVal
   // to make them available for the json configs and increment the size
   // below
-  checkCorrectSize<CacheConfig, 896>();
+  checkCorrectSize<CacheConfig, 984>();
 
   if (numPools != poolSizes.size()) {
     throw std::invalid_argument(folly::sformat(
@@ -201,15 +208,20 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     MarginalHitsStrategy::Config mhConfig;
     mhConfig.minSlabs = rebalanceMinSlabs;
     mhConfig.movingAverageParam = mhMovingAverageParam;
+    mhConfig.onlyUpdateHitIfRebalance = mhOnlyUpdateHitIfRebalance;
+    mhConfig.onlineLearningModel = mhOnlineLearningModel;
     mhConfig.maxFreeMemSlabs = mhMaxFreeMemSlabs;
     mhConfig.enableHoldOff = mhEnableHoldOff;
     mhConfig.minDiff = mhMinDiff;
     mhConfig.minDiffRatio = mhMinDiffRatio;
     mhConfig.tailSlabCnt = tailSlabCnt;
     mhConfig.decayWithHits = mhDecayWithHits;
+    mhConfig.enableOnlineLearning = mhEnableOnlineLearning;
     mhConfig.filterReceiverByEvictionRate = mhFilterReceiverByEvictionRate;
     mhConfig.autoIncThreshold = mhAutoIncThreshold;
     mhConfig.autoDecThreshold = mhAutoDecThreshold;
+    mhConfig.minModelSampleSize = mhMinModelSampleSize;
+    mhConfig.bufferSize = mhBufferSize;
     return std::make_shared<MarginalHitsStrategy>(mhConfig);
   } else if (rebalanceStrategy == "free-mem") {
     FreeMemStrategy::Config fmConfig;

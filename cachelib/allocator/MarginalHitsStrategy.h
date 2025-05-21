@@ -18,6 +18,7 @@
 
 #include "cachelib/allocator/MarginalHitsState.h"
 #include "cachelib/allocator/RebalanceStrategy.h"
+#include "cachelib/common/ModelApiClient.h"
 
 namespace facebook {
 namespace cachelib {
@@ -43,9 +44,9 @@ class MarginalHitsStrategy : public RebalanceStrategy {
     bool enableHoldOff{false};
 
     // Absolute difference to be rebalanced
-    unsigned int minDiff{0};
+    double minDiff{0};
 
-    unsigned int minDiffRatio{0};
+    double minDiffRatio{0};
 
     bool filterReceiverByEvictionRate{false};
 
@@ -58,6 +59,16 @@ class MarginalHitsStrategy : public RebalanceStrategy {
     bool autoDecThreshold{false};
 
     unsigned int thrashingCheckWindowSize{5};
+
+    bool enableOnlineLearning{false};
+
+    std::string onlineLearningModel{"SGD"};
+
+    unsigned int bufferSize{10};
+
+    unsigned int minModelSampleSize{10};
+
+    bool onlyUpdateHitIfRebalance{false};
 
     Config() noexcept {}
     explicit Config(double param) noexcept : Config(param, 1, 1) {}
@@ -115,6 +126,8 @@ class MarginalHitsStrategy : public RebalanceStrategy {
 
   explicit MarginalHitsStrategy(Config config = {});
 
+  static std::string RandomString(int len);
+
  protected:
   // This returns a copy of the current config.
   // This ensures that we're always looking at the same config even though
@@ -140,6 +153,16 @@ class MarginalHitsStrategy : public RebalanceStrategy {
   std::unordered_map<ClassId, double> computeClassMarginalHits(
       PoolId pid, const PoolStats& poolStats, unsigned int tailSlabCnt);
 
+  void initializeModelForPool(PoolId poolId);
+
+  ModelApiClient* getModelApiClient(PoolId poolId);
+
+  void fitModelForPool(PoolId poolId, int x1, int x2, int y);
+  int predictForPool(PoolId poolId, int x1, int x2);
+
+  std::vector<std::pair<RebalanceContext, bool>> processBuffer(
+    PoolId poolId, const RebalanceContext& newEvent);
+
   double computeNormalizedMarginalHitsRange(const std::unordered_map<ClassId, double>& scores, double epsilon = 1e-9) const;
   
 
@@ -148,6 +171,7 @@ class MarginalHitsStrategy : public RebalanceStrategy {
       PoolId pid,
       const std::unordered_map<ClassId, bool>& validVictim,
       const std::unordered_map<ClassId, bool>& validReceiver);
+
 
   // marginal hits states for classes in each pools
   std::unordered_map<PoolId, MarginalHitsState<ClassId>> classStates_;
@@ -158,6 +182,23 @@ class MarginalHitsStrategy : public RebalanceStrategy {
   Config config_;
   mutable std::mutex configLock_;
   double minDiffInUse_{0};
+
+  // online learning
+  std::unordered_map<PoolId, std::unique_ptr<ModelApiClient>> modelApiClients_;
+  std::unordered_map<PoolId, std::string> modelNames_;
+  std::unordered_map<PoolId, unsigned int> modelTrainingPositiveSamples_; 
+  std::unordered_map<PoolId, unsigned int> modelTrainingNegativeSamples_; 
+  std::unordered_map<PoolId, int> lastDiffs_; 
+
+  struct BufferedEvent {
+    RebalanceContext event;
+    int counter;
+    bool cancelled;
+  };
+
+
+  std::unordered_map<PoolId, std::deque<BufferedEvent>> eventBuffers_;
+
 };
 } // namespace cachelib
 } // namespace facebook

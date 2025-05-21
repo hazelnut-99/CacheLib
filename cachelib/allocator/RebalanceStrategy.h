@@ -29,6 +29,7 @@ struct RebalanceContext {
   ClassId receiverClassId{Slab::kInvalidClassId};
 
   double diffValue{0.0};
+  double deltaDiffValue{0.0};
 
   double normalizedRange{0.0};
 

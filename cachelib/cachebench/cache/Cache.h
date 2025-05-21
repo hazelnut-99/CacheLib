@@ -128,7 +128,7 @@ class Cache {
                        size_t size,
                        uint32_t ttlSecs = 0);
 
-  // derive which allocation class the item belongs                
+  // derive which allocation class the item belongs
   ClassId getClassId(PoolId pid, folly::StringPiece key, size_t size) const;
 
   // inserts the item into the cache and tracks it.
@@ -328,18 +328,17 @@ class Cache {
 
   // return the stats for the pool.
   PoolStats getPoolStats(PoolId pid) const { return cache_->getPoolStats(pid); }
-  
+
   void wakeupPoolRebalancer(uint64_t request_id) {
     // synchronously
     cache_->wakeupPoolRebalancer(true, request_id);
   }
 
-
-  void clearRebalancerPoolEventMap(PoolId pid){
+  void clearRebalancerPoolEventMap(PoolId pid) {
     cache_->clearRebalancerPoolEventMap(pid);
   }
 
-  bool checkForRebalanceThrashing(PoolId pid){
+  bool checkForRebalanceThrashing(PoolId pid) {
     return cache_->checkForRebalanceThrashing(pid);
   }
 
@@ -347,14 +346,15 @@ class Cache {
     return cache_->isLastRebalanceThrashing(pid);
   }
 
-  std::map<std::string, std::map<ClassId, double>> getPoolDeltaStats(PoolId pid) {
+  std::map<std::string, std::map<ClassId, double>> getPoolDeltaStats(
+      PoolId pid) {
     return cache_->getPoolDeltaStats(pid);
   }
 
-  unsigned int getRebalancerPoolEventCount(PoolId pid){
+  unsigned int getRebalancerPoolEventCount(PoolId pid) {
     return cache_->getRebalancerPoolEventCount(pid);
   }
-  
+
   // return the total number of inconsistent operations detected since start.
   unsigned int getInconsistencyCount() const {
     return inconsistencyCount_.load(std::memory_order_relaxed);
@@ -412,7 +412,6 @@ class Cache {
   std::map<PoolId, std::map<ClassId, uint64_t>> fetchAcCacheGetDelta();
 
   std::map<PoolId, std::map<ClassId, uint64_t>> fetchAcCacheGetMissDelta();
-
 
  private:
   // checks for the consistency of the operation for the item
@@ -496,12 +495,11 @@ class Cache {
   std::atomic<int64_t> totalDestructor_{0};
 
   std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheGets_;
-  
+
   std::map<PoolId, std::map<ClassId, uint64_t>> acNumCacheMisses_;
 
   std::map<PoolId, std::map<ClassId, uint64_t>> prevAcNumCacheGets_;
   std::map<PoolId, std::map<ClassId, uint64_t>> prevAcNumCacheMisses_;
-
 };
 
 // Specializations are required for each MMType
@@ -570,12 +568,13 @@ Cache<Allocator>::Cache(const CacheConfig& config,
       nandBytesBegin_{fetchNandWrites()},
       itemRecords_(config_.enableItemDestructorCheck) {
   constexpr size_t MB = 1024ULL * 1024ULL;
-  
+
   // for now do this for every one
-  //allocatorConfig_.enableTailHitsTracking();
-  if (config_.rebalanceStrategy == "marginal-hits" || config_.rebalanceStrategy == "hits-per-tail-slab") {
-    allocatorConfig_.enableTailHitsTracking();
-  }
+  allocatorConfig_.enableTailHitsTracking();
+  // if (config_.rebalanceStrategy == "marginal-hits" ||
+  //     config_.rebalanceStrategy == "hits-per-tail-slab") {
+  //       allocatorConfig_.enableTailHitsTracking();
+  // }
   XLOGF(INFO, "Using rebalance interval: {}", config_.poolRebalanceIntervalSec);
   allocatorConfig_.enablePoolRebalancing(
       config_.getRebalanceStrategy(),
@@ -587,7 +586,6 @@ Cache<Allocator>::Cache(const CacheConfig& config,
   allocatorConfig_.countColdTailHitsOnly = config_.countColdTailHitsOnly;
   allocatorConfig_.tailSlabCnt = config_.tailSlabCnt;
   allocatorConfig_.enableShardsMrc = config_.enableShardsMrc;
-  
 
   // if (config_.moveOnSlabRelease && movingSync != nullptr) {
   //   XLOGF(INFO, "Enabling moving on slab release");
@@ -602,12 +600,11 @@ Cache<Allocator>::Cache(const CacheConfig& config,
 
   if (config_.moveOnSlabRelease) {
     XLOGF(INFO, "Enabling moving on slab release");
-    allocatorConfig_.enableMovingOnSlabRelease(
-        [](Item& oldItem, Item& newItem, Item* parentPtr) {
-          XDCHECK(oldItem.isChainedItem() == (parentPtr != nullptr));
-          std::memcpy(newItem.getMemory(), oldItem.getMemory(),
-                      oldItem.getSize());
-        });
+    allocatorConfig_.enableMovingOnSlabRelease([](Item& oldItem, Item& newItem,
+                                                  Item* parentPtr) {
+      XDCHECK(oldItem.isChainedItem() == (parentPtr != nullptr));
+      std::memcpy(newItem.getMemory(), oldItem.getMemory(), oldItem.getSize());
+    });
   }
 
   if (config_.allocSizes.empty()) {
@@ -1001,14 +998,16 @@ typename Cache<Allocator>::WriteHandle Cache<Allocator>::allocate(
 }
 
 template <typename Allocator>
-ClassId Cache<Allocator>::getClassId(PoolId pid, folly::StringPiece key, size_t size) const {
-    // number of bytes required for this item
-    const auto requiredSize = Item::getRequiredSize(key, CacheValue::getSize(size));
-    const auto cid = cache_->allocator_->getAllocationClassId(pid, requiredSize);
+ClassId Cache<Allocator>::getClassId(PoolId pid,
+                                     folly::StringPiece key,
+                                     size_t size) const {
+  // number of bytes required for this item
+  const auto requiredSize =
+      Item::getRequiredSize(key, CacheValue::getSize(size));
+  const auto cid = cache_->allocator_->getAllocationClassId(pid, requiredSize);
 
-    return cid;
+  return cid;
 }
-
 
 template <typename Allocator>
 typename Cache<Allocator>::WriteHandle Cache<Allocator>::insertOrReplace(
@@ -1227,11 +1226,10 @@ Stats Cache<Allocator>::getStats() const {
   }
 
   std::map<PoolId, std::map<ClassId, ACStats>> allocationClassStats{};
-  std::map<PoolId, std::map<ClassId, uint64_t>> acEvictionAgeStats{}; 
-  std::map<PoolId, unsigned int> poolFragementationSize{}; 
-  std::map<PoolId, std::map<ClassId, uint64_t>> perPoolFragmentationSize{}; 
+  std::map<PoolId, std::map<ClassId, uint64_t>> acEvictionAgeStats{};
+  std::map<PoolId, unsigned int> poolFragementationSize{};
+  std::map<PoolId, std::map<ClassId, uint64_t>> perPoolFragmentationSize{};
   std::map<PoolId, std::map<ClassId, uint64_t>> perPoolFreeMemorySize{};
-
 
   for (size_t pid = 0; pid < pools_.size(); pid++) {
     PoolId poolId = static_cast<PoolId>(pid);
@@ -1243,14 +1241,16 @@ Stats Cache<Allocator>::getStats() const {
       acEvictionAgeStats[poolId][cid] = poolStats.evictionAgeForClass(cid);
       perPoolFreeMemorySize[poolId][cid] = stats.getTotalFreeMemory();
     }
-    for (auto [cid, stats]: poolStats.cacheStats) {
+    for (auto [cid, stats] : poolStats.cacheStats) {
       perPoolFragmentationSize[poolId][cid] = stats.fragmentationSize;
     }
     // Populate rebalance events
-    const auto& rebalancer_events = cache_->getAllSlabReleaseEvents(pid).rebalancerEvents;
+    const auto& rebalancer_events =
+        cache_->getAllSlabReleaseEvents(pid).rebalancerEvents;
     ret.rebalanceEvents[pid].clear();
     for (const auto& event : rebalancer_events) {
-      ret.rebalanceEvents[pid].emplace_back(event.from, event.to, event.durationMs);
+      ret.rebalanceEvents[pid].emplace_back(event.from, event.to,
+                                            event.durationMs);
     }
   }
 
@@ -1481,64 +1481,66 @@ void Cache<Allocator>::updateItemRecordVersion(WriteHandle& it) {
 
 template <typename Allocator>
 void Cache<Allocator>::recordAcCacheGet(PoolId pid, ClassId cid) {
-    ++acNumCacheGets_[pid][cid];
+  ++acNumCacheGets_[pid][cid];
 }
 
 template <typename Allocator>
 void Cache<Allocator>::recordAcCacheGetMiss(PoolId pid, ClassId cid) {
-    ++acNumCacheMisses_[pid][cid];
+  ++acNumCacheMisses_[pid][cid];
 }
 
 // Implementation of fetchAcCacheGetDelta
 template <typename Allocator>
-std::map<PoolId, std::map<ClassId, uint64_t>> Cache<Allocator>::fetchAcCacheGetDelta() {
-    std::map<PoolId, std::map<ClassId, uint64_t>> delta;
+std::map<PoolId, std::map<ClassId, uint64_t>>
+Cache<Allocator>::fetchAcCacheGetDelta() {
+  std::map<PoolId, std::map<ClassId, uint64_t>> delta;
 
-    for (const auto& [poolId, classMap] : acNumCacheGets_) {
-        for (const auto& [classId, currentCount] : classMap) {
-            uint64_t previousCount = 0;
+  for (const auto& [poolId, classMap] : acNumCacheGets_) {
+    for (const auto& [classId, currentCount] : classMap) {
+      uint64_t previousCount = 0;
 
-            // Check if the pool and class exist in the previous state
-            if (prevAcNumCacheGets_.count(poolId) &&
-                prevAcNumCacheGets_[poolId].count(classId)) {
-                previousCount = prevAcNumCacheGets_[poolId][classId];
-            }
+      // Check if the pool and class exist in the previous state
+      if (prevAcNumCacheGets_.count(poolId) &&
+          prevAcNumCacheGets_[poolId].count(classId)) {
+        previousCount = prevAcNumCacheGets_[poolId][classId];
+      }
 
-            // Calculate the delta
-            delta[poolId][classId] = currentCount - previousCount;
-        }
+      // Calculate the delta
+      delta[poolId][classId] = currentCount - previousCount;
     }
+  }
 
-    // Update the previous state with the current state
-    prevAcNumCacheGets_ = acNumCacheGets_;
+  // Update the previous state with the current state
+  prevAcNumCacheGets_ = acNumCacheGets_;
 
-    return delta;
+  return delta;
 }
 
 // Implementation of fetchAcCacheGetMissDelta
 template <typename Allocator>
-std::map<PoolId, std::map<ClassId, uint64_t>> Cache<Allocator>::fetchAcCacheGetMissDelta() {
-    std::map<PoolId, std::map<ClassId, uint64_t>> delta;
+std::map<PoolId, std::map<ClassId, uint64_t>>
+Cache<Allocator>::fetchAcCacheGetMissDelta() {
+  std::map<PoolId, std::map<ClassId, uint64_t>> delta;
 
-    for (const auto& [poolId, classMap] : acNumCacheMisses_) {
-        for (const auto& [classId, currentCount] : classMap) {
-            uint64_t previousCount = 0;
+  for (const auto& [poolId, classMap] : acNumCacheMisses_) {
+    for (const auto& [classId, currentCount] : classMap) {
+      uint64_t previousCount = 0;
 
-            // Check if the pool and class exist in the previous state
-            if (prevAcNumCacheMisses_.count(poolId) &&
-                prevAcNumCacheMisses_[poolId].count(classId)) {
-                previousCount = prevAcNumCacheMisses_[poolId][classId];
-            }
+      // Check if the pool and class exist in the previous state
+      if (prevAcNumCacheMisses_.count(poolId) &&
+          prevAcNumCacheMisses_[poolId].count(classId)) {
+        previousCount = prevAcNumCacheMisses_[poolId][classId];
+      }
 
-            // Calculate the delta
-            delta[poolId][classId] = currentCount - previousCount;
-        }
+      // Calculate the delta
+      delta[poolId][classId] = currentCount - previousCount;
     }
+  }
 
-    // Update the previous state with the current state
-    prevAcNumCacheMisses_ = acNumCacheMisses_;
+  // Update the previous state with the current state
+  prevAcNumCacheMisses_ = acNumCacheMisses_;
 
-    return delta;
+  return delta;
 }
 
 } // namespace facebook::cachelib::cachebench

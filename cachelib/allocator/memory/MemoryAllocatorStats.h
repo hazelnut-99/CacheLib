@@ -56,6 +56,10 @@ struct ACStats {
   constexpr size_t getTotalFreeMemory() const noexcept {
     return Slab::kSize * freeSlabs + freeAllocs * allocSize;
   }
+
+  constexpr unsigned int getTotalFreeAllocs() const noexcept {
+    return freeAllocs + freeSlabs * allocsPerSlab;
+  }
 };
 
 // structure to query stats corresponding to a MemoryPool
