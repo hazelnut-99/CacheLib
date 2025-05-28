@@ -17,6 +17,8 @@
 #include "cachelib/allocator/PoolRebalancer.h"
 
 #include <folly/logging/xlog.h>
+#include <folly/dynamic.h>
+#include <folly/json.h>
 
 #include <stdexcept>
 #include <thread>
@@ -111,11 +113,17 @@ void PoolRebalancer::releaseSlab(PoolId pid,
         poolStats.allocSizeForClass(victimClassId), receiverAllocSize,
         poolStats.evictionAgeForClass(victimClassId), receiverEvictionAge,
         poolStats.mpStats.acStats.at(victimClassId).freeAllocs);
-  XLOGF(DBG,
-        "Moved slab in Pool Id: {}, Victim Class Id: {}, Receiver "
-        "Class Id: {}",
-        static_cast<int>(pid), static_cast<int>(victimClassId),
-        static_cast<int>(receiverClassId));
+  
+  folly::dynamic logData = folly::dynamic::object(
+          "request_id", request_id)(
+          "pool_id", static_cast<int>(pid))(
+          "victim", folly::dynamic::object("id", static_cast<int>(victimClassId)))(
+          "receiver", folly::dynamic::object("id", static_cast<int>(receiverClassId)));
+    
+  std::string jsonString = folly::toJson(logData);
+  XLOGF(DBG, "Slab_movement_event: {}", jsonString);
+  
+  
 }
 
 RebalanceContext PoolRebalancer::pickVictimByFreeAlloc(PoolId pid) const {

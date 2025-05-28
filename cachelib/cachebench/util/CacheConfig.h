@@ -83,6 +83,8 @@ struct CacheConfig : public JSONConfig {
   bool useAdaptiveRebalanceInterval{false};
   bool useAdaptiveRebalanceIntervalV2{false};
   bool useAnomalyDetection{false};
+  double ewmaR{0.5};
+  double ewmaL{3.5};
 
   std::string intervalAdjustmentStrategy;
 

@@ -109,9 +109,8 @@ class CacheStressor : public Stressor {
     useAnomalyDetection_ = cacheConfig.useAnomalyDetection;
     resetIntervalTimings_ = splitStringToIntSet(cacheConfig.resetIntervalTimings);
 
-    detector_ = DistributionAnomalyDetector(3, 30, false);
-    ewma_ = EWMA(0.5, 3.5);
-    ewmaDelta_ = EWMA(0.5, 3.5);
+    ewma_ = EWMA(cacheConfig.ewmaR, cacheConfig.ewmaL);
+    ewmaDelta_ = EWMA(cacheConfig.ewmaR, cacheConfig.ewmaL);
 
     intervalAdjustmentStrategy_ = cacheConfig.intervalAdjustmentStrategy;
   
@@ -422,19 +421,15 @@ class CacheStressor : public Stressor {
               };
 
               folly::dynamic jsonStats = folly::dynamic::object;
-              constexpr std::array<const char*, 12> metrics = {
-                  "normalizedMarginalHits",
-                  "normalizedHits", 
-                  "normalizedEvictions",
-                  "normalizedHitsPerSlab",
-                  "normalizedMissEstimation",
-                  "normalizedTailAge",  
+              constexpr std::array<const char*, 8> metrics = {
                   "tailAge",
                   "marginalHits",
                   "hits",
                   "evictions",
                   "hitsPerSlab",
-                  "missEstimation"
+                  "missEstimation",
+                  "numSlabs",
+                  "freeMemory"
               };
               
               for (const auto& metric : metrics) {
@@ -445,6 +440,7 @@ class CacheStressor : public Stressor {
               }
             
               if (!jsonStats.empty()) {
+                jsonStats["request_id"] = i;
                   XLOGF(DBG, "Delta_statistics_logging: {}", folly::toJson(jsonStats));
               }
 
@@ -457,6 +453,10 @@ class CacheStressor : public Stressor {
                     rebalanceIntervalInUse_ = wakeUpRebalancerEveryXReqs_;
                     XLOGF(INFO, "Rebalance interval adjusted due to anomaly: from {} to {}, request_id: {}", oldInterval, rebalanceIntervalInUse_, i);
                     cache_->clearRebalancerPoolEventMap(pid);
+                    cache_->incrAnomalyCount();
+                    if(useAdaptiveRebalanceIntervalV2_) {
+                      useAnomalyDetection_ = false;
+                    }
                 }
                 lastCV_ = cv;
               }
@@ -478,7 +478,7 @@ class CacheStressor : public Stressor {
           if (useAdaptiveRebalanceInterval_) {
             bool thrashingDected = cache_->checkForRebalanceThrashing(pid);
             auto rebalanceEventCount = cache_->getRebalancerPoolEventCount(pid);
-            if (thrashingDected) {
+            if (thrashingDected && rebalanceEventCount > 4) {
               XLOGF(INFO, "Effective movement rate is low, increasing "
                         "the rebalance interval, from {} : {}", rebalanceIntervalInUse_, rebalanceIntervalInUse_ * increaseIntervalFactor_);
               rebalanceIntervalInUse_ *= increaseIntervalFactor_;
@@ -486,52 +486,19 @@ class CacheStressor : public Stressor {
             }
           }
 
-
           if (useAdaptiveRebalanceIntervalV2_) {
-            bool thrashingDetected = cache_->isLastRebalanceThrashing(pid);
-          
-            const auto oldInterval = rebalanceIntervalInUse_;
-            const auto additiveStep = wakeUpRebalancerEveryXReqs_;
-            const auto factor = increaseIntervalFactor_;
-          
-            if (intervalAdjustmentStrategy_ == "mimd") {
-              if (thrashingDetected) {
-                rebalanceIntervalInUse_ *= factor;
-              } else {
-                rebalanceIntervalInUse_ = std::max(rebalanceIntervalInUse_ / factor, additiveStep);
-              }
-          
-            } else if (intervalAdjustmentStrategy_ == "miad") {
-              if (thrashingDetected) {
-                rebalanceIntervalInUse_ *= factor;
-              } else {
-                rebalanceIntervalInUse_ = std::max(rebalanceIntervalInUse_ - additiveStep, additiveStep);
-              }
-          
-            } else if (intervalAdjustmentStrategy_ == "aimd") {
-              if (thrashingDetected) {
-                rebalanceIntervalInUse_ += additiveStep;
-              } else {
-                rebalanceIntervalInUse_ = std::max(rebalanceIntervalInUse_ / factor, additiveStep);
-              }
-          
-            } else if (intervalAdjustmentStrategy_ == "aiad") {
-              if (thrashingDetected) {
-                rebalanceIntervalInUse_ += additiveStep;
-              } else {
-                rebalanceIntervalInUse_ = std::max(rebalanceIntervalInUse_ - additiveStep, additiveStep);
-              }
-          
-            } else {
-              XLOGF(ERR, "Unknown intervalAdjustmentStrategy_: {}", intervalAdjustmentStrategy_);
-            }
-          
-            if (rebalanceIntervalInUse_ != oldInterval) {
-              XLOGF(INFO, "Rebalance interval adjusted due to {}thrashing: from {} to {} using strategy '{}'",
-                    thrashingDetected ? "" : "non-", oldInterval, rebalanceIntervalInUse_, intervalAdjustmentStrategy_);
+            auto rebalanceEventCount = cache_->getRebalancerPoolEventCount(pid);
+            auto effectiveMoveRate = cache_->getEffectiveMovementRate(pid);
+            if(rebalanceEventCount == 20 && effectiveMoveRate <= 0.05) {
+              XLOGF(INFO, "Effective movement rate is too low, stop the rebalancer");
+              rebalanceIntervalInUse_ = std::numeric_limits<uint64_t>::max();
+              cache_->clearRebalancerPoolEventMap(pid);
+              useAnomalyDetection_ = true;
+              ewma_.reset();
+              ewmaDelta_.reset(); 
             }
           }
-        
+
         }
 
         OpType op = req.getOp();
@@ -605,39 +572,49 @@ class CacheStressor : public Stressor {
           }
           break;
         }
+        // chained get
         case OpType::kAddChained: {
           ++stats.get;
-          auto lock = chainedItemAcquireUniqueLock(*key);
-          auto it = cache_->findToWrite(*key);
-          if (!it) {
+          auto slock = chainedItemAcquireSharedLock(*key);
+          auto xlock = decltype(chainedItemAcquireUniqueLock(*key)){};
+          if (ticker_) {
+            ticker_->updateTimeStamp(req.timestamp);
+          }
+          cache_->recordAccess(*key);
+          auto it = cache_->find(*key);
+          if (it == nullptr) {
             ++stats.getMiss;
-
+            result = OpResultType::kGetMiss;
             ++stats.set;
-            it = cache_->allocate(pid, *key, *(req.sizeBegin), req.ttlSecs);
-            if (!it) {
+            xlock = chainedItemAcquireUniqueLock(*key);
+            auto parent = cache_->allocate(pid, *key, *(req.sizeBegin), req.ttlSecs);
+            if (!parent) {
               ++stats.setFailure;
               break;
             }
-            populateItem(it);
-            cache_->insertOrReplace(it);
-          }
-          XDCHECK(req.sizeBegin + 1 != req.sizeEnd);
-          bool chainSuccessful = false;
-          for (auto j = req.sizeBegin + 1; j != req.sizeEnd; j++) {
-            ++stats.addChained;
+            populateItem(parent);
+            cache_->insertOrReplace(parent);
+          
+            XDCHECK(req.sizeBegin + 1 != req.sizeEnd);
+            bool chainSuccessful = false;
+            for (auto j = req.sizeBegin + 1; j != req.sizeEnd; j++) {
+              ++stats.addChained;
 
-            const auto size = *j;
-            auto child = cache_->allocateChainedItem(it, size);
-            if (!child) {
-              ++stats.addChainedFailure;
-              continue;
+              const auto size = *j;
+              auto child = cache_->allocateChainedItem(parent, size);
+              if (!child) {
+                ++stats.addChainedFailure;
+                continue;
+              }
+              chainSuccessful = true;
+              populateItem(child);
+              cache_->addChainedItem(parent, std::move(child));
             }
-            chainSuccessful = true;
-            populateItem(child);
-            cache_->addChainedItem(it, std::move(child));
-          }
-          if (chainSuccessful && cache_->consistencyCheckEnabled()) {
-            cache_->trackChainChecksum(it);
+            if (chainSuccessful && cache_->consistencyCheckEnabled()) {
+              cache_->trackChainChecksum(parent);
+            }
+          } else {
+            result = OpResultType::kGetHit;
           }
           break;
         }
@@ -879,8 +856,6 @@ double coefficientOfVariation(const std::map<ClassId, double>& values) {
   std::string intervalAdjustmentStrategy_{"mimd"};
 
   double lastCV_{0.0};
-
-  DistributionAnomalyDetector detector_;
 
   EWMA ewma_;
 

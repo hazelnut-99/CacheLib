@@ -225,7 +225,7 @@ class OGBinaryReplayGenerator : public ReplayGeneratorBase {
 };
 
 inline bool OGBinaryReplayGenerator::parseRequest(
-    const std::string& line, std::unique_ptr<OGReqWrapper>& req) {
+  const std::string& line, std::unique_ptr<OGReqWrapper>& req) {
   if (!traceStream_.setNextLine(line)) {
     return false;
   }
@@ -248,13 +248,31 @@ inline bool OGBinaryReplayGenerator::parseRequest(
     uint64_t timestampSeconds = timestampRaw / timestampFactor_;
     req->req_.timestamp = timestampSeconds;
   }
-  // look-aside get
-  req->req_.setOp(OpType::kGet);
 
-  // Set size
-  req->sizes_[0] = sizeField.value();
+  size_t chunkSize = 1024 * 1024; // 1 MB
+  size_t objSize = sizeField.value();
 
-  // Set op_count, once for now
+  if (objSize > chunkSize) {
+    size_t numChunks = (objSize + chunkSize - 1) / chunkSize; 
+    req->sizes_.clear(); 
+    req->sizes_.reserve(numChunks); 
+
+    for (size_t i = 0; i < numChunks; ++i) {
+      size_t currentChunkSize = (i == numChunks - 1)
+                                ? (objSize % chunkSize == 0 ? chunkSize : objSize % chunkSize)
+                                : chunkSize;
+      req->sizes_.push_back(currentChunkSize);
+    }
+    req->req_.setOp(OpType::kAddChained);
+  } else {
+    req->sizes_.clear(); 
+    req->sizes_.resize(1); 
+    req->sizes_[0] = objSize;
+    req->req_.setOp(OpType::kGet);
+  }
+  req->req_.sizeBegin = req->sizes_.begin();
+  req->req_.sizeEnd = req->sizes_.end();
+
   req->repeats_ = 1;
   if (!req->repeats_) {
     return false;
@@ -286,18 +304,43 @@ inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternal() {
 
 inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternalZstd() {
   auto reqWrapper = std::make_unique<OGReqWrapper>();
+  size_t chunkSize = 1024 * 1024; // 1 MB
+
   do {
     OracleGeneralBinRequest req;
     if (!zstdReader_.read_one_req(&req)) {
       throw EndOfTrace("EOF reached");
     }
+
     reqWrapper->key_ = std::to_string(req.objId);
-    reqWrapper->sizes_[0] = req.objSize;
+
+    if (req.objSize > chunkSize) {
+      size_t numChunks = (req.objSize + chunkSize - 1) / chunkSize; 
+      reqWrapper->sizes_.clear(); 
+      reqWrapper->sizes_.reserve(numChunks); 
+      for (size_t i = 0; i < numChunks; ++i) {
+        size_t currentChunkSize = (i == numChunks - 1) 
+                                  ? (req.objSize % chunkSize == 0 ? chunkSize : req.objSize % chunkSize)
+                                  : chunkSize;
+        reqWrapper->sizes_.push_back(currentChunkSize);
+      }
+
+      reqWrapper->req_.setOp(OpType::kAddChained);
+    } else {
+      reqWrapper->sizes_.clear(); 
+      reqWrapper->sizes_.resize(1); 
+      reqWrapper->sizes_[0] = req.objSize; 
+      reqWrapper->req_.setOp(OpType::kGet);
+    }
+
+    reqWrapper->req_.sizeBegin = reqWrapper->sizes_.begin();
+    reqWrapper->req_.sizeEnd = reqWrapper->sizes_.end();
+
     reqWrapper->req_.timestamp = req.clockTime;
-    reqWrapper->req_.setOp(OpType::kGet);
     reqWrapper->repeats_ = 1;
     parseSuccess++;
   } while (reqWrapper->repeats_ == 0);
+
   return reqWrapper;
 }
 

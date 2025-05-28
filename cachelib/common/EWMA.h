@@ -65,6 +65,21 @@ public:
             return false; // Indicate no anomaly
         }
     }
+
+    /**
+     * @brief Reset the EWMA statistics to initial values.
+     *
+     * @param mu Initial mean (optional, defaults to the original mu_).
+     * @param sigma Initial standard deviation (optional, defaults to the original sigma_).
+     */
+    void reset(double mu = 0.0, double sigma = 1.0) {
+        mu_ = mu;
+        sigma_ = sigma;
+        Z_ = mu_;
+        sigma_Z_ = 0.0;
+        n_ = 2;
+        changepoints_.clear();
+    }
     /**
      * @brief Process a stream of data.
      *

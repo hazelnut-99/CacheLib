@@ -418,6 +418,8 @@ std::map<std::string, std::map<ClassId, double>> RebalanceStrategy::getPoolDelta
       statsMap["hitsPerSlab"][classId] = poolStats.numSlabsForClass(classId) > 0 ? rebalanceInfo.deltaHitsPerSlab(poolStats) : 0;
       statsMap["missEstimation"][classId] = rebalanceInfo.deltaHits(poolStats) + rebalanceInfo.getDeltaEvictions(poolStats);
       statsMap["tailAge"][classId] = poolEvictionAgeStats.getOldestElementAge(classId);
+      statsMap["numSlabs"][classId] = poolStats.numSlabsForClass(classId);
+      statsMap["freeMemory"][classId] = poolStats.mpStats.acStats.at(classId).getTotalFreeMemory();
     }
 
     // Second pass: normalize each metric

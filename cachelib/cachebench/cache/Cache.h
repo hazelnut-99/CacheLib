@@ -342,8 +342,16 @@ class Cache {
     return cache_->checkForRebalanceThrashing(pid);
   }
 
+  double getEffectiveMovementRate(PoolId pid) const {
+    return cache_->getEffectiveMovementRate(pid);
+  }
+
   bool isLastRebalanceThrashing(PoolId pid) const {
     return cache_->isLastRebalanceThrashing(pid);
+  }
+
+  void incrAnomalyCount() {
+    anomalyCount_ += 1;
   }
 
   std::map<std::string, std::map<ClassId, double>> getPoolDeltaStats(
@@ -500,6 +508,8 @@ class Cache {
 
   std::map<PoolId, std::map<ClassId, uint64_t>> prevAcNumCacheGets_;
   std::map<PoolId, std::map<ClassId, uint64_t>> prevAcNumCacheMisses_;
+
+  unsigned int anomalyCount_{0};
 };
 
 // Specializations are required for each MMType
@@ -1001,12 +1011,17 @@ template <typename Allocator>
 ClassId Cache<Allocator>::getClassId(PoolId pid,
                                      folly::StringPiece key,
                                      size_t size) const {
-  // number of bytes required for this item
+
   const auto requiredSize =
       Item::getRequiredSize(key, CacheValue::getSize(size));
-  const auto cid = cache_->allocator_->getAllocationClassId(pid, requiredSize);
 
-  return cid;
+  try {
+    const auto cid = cache_->allocator_->getAllocationClassId(pid, requiredSize);
+    return cid;
+  } catch (const std::exception& e) {
+    XLOGF(INFO, "Failed to get allocation class ID: {}", size);
+    return static_cast<ClassId>(-1); // Return -1 as the default value
+  }
 }
 
 template <typename Allocator>
@@ -1215,6 +1230,7 @@ Stats Cache<Allocator>::getStats() const {
   Stats ret;
   ret.poolUsableSize = aggregate.poolUsableSize;
   ret.poolUnusedBytes = aggregate.freeMemoryBytes();
+  ret.anomalyCount = anomalyCount_;
 
   ret.poolUsageFraction.push_back(usageFraction);
   for (size_t pid = 1; pid < pools_.size(); pid++) {

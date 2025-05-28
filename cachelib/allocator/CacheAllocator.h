@@ -399,6 +399,7 @@ class CacheAllocator : public CacheBase {
   void clearRebalancerPoolEventMap(PoolId pid);
   bool checkForRebalanceThrashing(PoolId pid);
   bool isLastRebalanceThrashing(PoolId pid);
+  double getEffectiveMovementRate(PoolId pid);
   std::map<std::string, std::map<ClassId, double>>  getPoolDeltaStats(PoolId pid);
   unsigned int getRebalancerPoolEventCount(PoolId pid);
 
@@ -4603,6 +4604,11 @@ template <typename CacheTrait>
 bool CacheAllocator<CacheTrait>::checkForRebalanceThrashing(PoolId pid) {
   return poolRebalancer_->checkForThrashing(pid);
 }
+template <typename CacheTrait>
+double CacheAllocator<CacheTrait>::getEffectiveMovementRate(PoolId pid) {
+  return poolRebalancer_->queryEffectiveMoveRate(pid);
+}
+
 
 template <typename CacheTrait>
 bool CacheAllocator<CacheTrait>::isLastRebalanceThrashing(PoolId pid) {

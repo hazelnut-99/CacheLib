@@ -45,6 +45,8 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, rebalanceMinSlabs);
   JSONSetVal(configJson, rebalanceDiffRatio);
   JSONSetVal(configJson, intervalAdjustmentStrategy);
+  JSONSetVal(configJson, ewmaR);
+  JSONSetVal(configJson, ewmaL);
 
   JSONSetVal(configJson, ltaMinTailAgeDifference);
   JSONSetVal(configJson, ltaNumSlabsFreeMem);
@@ -160,7 +162,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   // if you added new fields to the configuration, update the JSONSetVal
   // to make them available for the json configs and increment the size
   // below
-  checkCorrectSize<CacheConfig, 984>();
+  checkCorrectSize<CacheConfig, 1000>();
 
   if (numPools != poolSizes.size()) {
     throw std::invalid_argument(folly::sformat(

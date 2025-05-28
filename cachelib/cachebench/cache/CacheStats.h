@@ -89,6 +89,8 @@ struct Stats {
 
   uint64_t numNvmItemRemovedSetSize{0};
 
+  uint64_t anomalyCount{0};
+
   util::PercentileStats::Estimates cacheAllocateLatencyNs;
   util::PercentileStats::Estimates cacheFindLatencyNs;
 
@@ -170,6 +172,7 @@ struct Stats {
     json["totalMissCnt"] = totalMisses;
     json["getMissCnt"] = numCacheGetMiss;
     json["getCnt"] = numCacheGets;
+    json["anomalyCount"] = anomalyCount;
     json["getMissRatio"] = invertPctFn(numCacheGetMiss, numCacheGets);
     json["poolUsableSize"] = poolUsableSize;  
     json["poolFragmentationSize"] = poolFragementationSize.at(0);
@@ -290,6 +293,8 @@ struct Stats {
     out << folly::sformat("Get Miss Ratio : {:.2f}%",
                           invertPctFn(numCacheGetMiss, numCacheGets))
         << std::endl;
+    
+    out << folly::sformat("Anomaly Detected  : {:,}", anomalyCount) << std::endl;
 
     out << folly::sformat("Items in RAM  : {:,}", numItems) << std::endl;
     out << folly::sformat("Items in NVM  : {:,}", numNvmItems) << std::endl;
