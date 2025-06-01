@@ -91,6 +91,11 @@ struct Stats {
 
   uint64_t anomalyCount{0};
 
+  std::vector<unsigned int> rebalanceReqIds;
+  std::vector<unsigned int> anomalyReqIds;
+  std::vector<double> effectiveMovementRates;
+  std::unordered_map<uint64_t, uint64_t> rebalanceIntervals;
+
   util::PercentileStats::Estimates cacheAllocateLatencyNs;
   util::PercentileStats::Estimates cacheFindLatencyNs;
 
@@ -173,6 +178,27 @@ struct Stats {
     json["getMissCnt"] = numCacheGetMiss;
     json["getCnt"] = numCacheGets;
     json["anomalyCount"] = anomalyCount;
+    folly::dynamic rebalanceReqIdsJson = folly::dynamic::array;
+    for (const auto& id : rebalanceReqIds) {
+        rebalanceReqIdsJson.push_back(id);
+    }
+    json["rebalanceReqIds"] = rebalanceReqIdsJson;
+    folly::dynamic anomalyReqIdsJson = folly::dynamic::array;
+    for (const auto& id : anomalyReqIds) {
+        anomalyReqIdsJson.push_back(id);
+    }
+    json["anomalyReqIds"] = anomalyReqIdsJson;
+    json["effectiveMovementRates"] = folly::dynamic::array;
+    for (const auto& rate : effectiveMovementRates) {
+      json["effectiveMovementRates"].push_back(rate);
+    }
+
+    folly::dynamic rebalanceIntervalsJson = folly::dynamic::object;
+    for (const auto& [requestId, interval] : rebalanceIntervals) {
+        rebalanceIntervalsJson[folly::to<std::string>(requestId)] = interval;
+    }
+    json["rebalanceIntervals"] = rebalanceIntervalsJson;
+
     json["getMissRatio"] = invertPctFn(numCacheGetMiss, numCacheGets);
     json["poolUsableSize"] = poolUsableSize;  
     json["poolFragmentationSize"] = poolFragementationSize.at(0);

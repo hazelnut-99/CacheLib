@@ -337,6 +337,7 @@ class CacheStressor : public Stressor {
 
     std::optional<uint64_t> lastRequestId = std::nullopt;
     std::optional<uint64_t> lastRequestTs = std::nullopt;
+    cache_->addRebalanceInterval(0, rebalanceIntervalInUse_);
     for (uint64_t i = 0;
          i < config_.numOps &&
          cache_->getInconsistencyCount() < config_.maxInconsistencyCount &&
@@ -451,9 +452,11 @@ class CacheStressor : public Stressor {
                 if((anomaly1 || anomaly2) && useAnomalyDetection_) {
                     const auto oldInterval = rebalanceIntervalInUse_;
                     rebalanceIntervalInUse_ = wakeUpRebalancerEveryXReqs_;
+                    cache_->addRebalanceInterval(i, rebalanceIntervalInUse_);
                     XLOGF(INFO, "Rebalance interval adjusted due to anomaly: from {} to {}, request_id: {}", oldInterval, rebalanceIntervalInUse_, i);
                     cache_->clearRebalancerPoolEventMap(pid);
                     cache_->incrAnomalyCount();
+                    cache_->addAnomayRequestId(i);
                     if(useAdaptiveRebalanceIntervalV2_) {
                       useAnomalyDetection_ = false;
                     }
@@ -466,6 +469,7 @@ class CacheStressor : public Stressor {
         if(resetIntervalTimings_.count(i) > 0) {
           XLOGF(INFO, "Resetting interval timings at i = {}", i);
           rebalanceIntervalInUse_ = wakeUpRebalancerEveryXReqs_;
+          cache_->addRebalanceInterval(i, rebalanceIntervalInUse_);
           cache_->clearRebalancerPoolEventMap(pid);
         }
 
@@ -474,6 +478,9 @@ class CacheStressor : public Stressor {
         if((i - lastRebalanceTime_) >= rebalanceIntervalInUse_ && !rebalancerDisabled_) {
           cache_->wakeupPoolRebalancer(i);
           lastRebalanceTime_ = i;
+          cache_->addRebalanceRequestId(i);
+          double emr = cache_->getEffectiveMovementRate(pid);
+          //cache_->addEffectiveMovementRate(emr);
         
           if (useAdaptiveRebalanceInterval_) {
             bool thrashingDected = cache_->checkForRebalanceThrashing(pid);
@@ -482,6 +489,7 @@ class CacheStressor : public Stressor {
               XLOGF(INFO, "Effective movement rate is low, increasing "
                         "the rebalance interval, from {} : {}", rebalanceIntervalInUse_, rebalanceIntervalInUse_ * increaseIntervalFactor_);
               rebalanceIntervalInUse_ *= increaseIntervalFactor_;
+              cache_->addRebalanceInterval(i, rebalanceIntervalInUse_);
               cache_->clearRebalancerPoolEventMap(pid);
             }
           }
@@ -492,6 +500,7 @@ class CacheStressor : public Stressor {
             if(rebalanceEventCount == 20 && effectiveMoveRate <= 0.05) {
               XLOGF(INFO, "Effective movement rate is too low, stop the rebalancer");
               rebalanceIntervalInUse_ = std::numeric_limits<uint64_t>::max();
+              cache_->addRebalanceInterval(i, rebalanceIntervalInUse_);
               cache_->clearRebalancerPoolEventMap(pid);
               useAnomalyDetection_ = true;
               ewma_.reset();

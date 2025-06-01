@@ -354,6 +354,22 @@ class Cache {
     anomalyCount_ += 1;
   }
 
+  void addRebalanceRequestId(uint64_t requestId) {
+    rebalanceReqIds_.push_back(static_cast<unsigned int>(requestId));
+  }
+
+  void addAnomayRequestId(uint64_t requestId) {
+    anomalyReqIds_.push_back(static_cast<unsigned int>(requestId));
+  }
+
+  void addEffectiveMovementRate(double rate) {
+    effectiveMovementRates_.push_back(rate);
+  }
+
+  void addRebalanceInterval(uint64_t requestId, uint64_t rebalanceInterval) {
+    rebalanceIntervals_[requestId] = rebalanceInterval;
+}
+
   std::map<std::string, std::map<ClassId, double>> getPoolDeltaStats(
       PoolId pid) {
     return cache_->getPoolDeltaStats(pid);
@@ -510,6 +526,16 @@ class Cache {
   std::map<PoolId, std::map<ClassId, uint64_t>> prevAcNumCacheMisses_;
 
   unsigned int anomalyCount_{0};
+
+  std::vector<unsigned int> rebalanceReqIds_;
+
+  std::vector<unsigned int> anomalyReqIds_;
+
+  std::vector<double> effectiveMovementRates_;
+
+  std::unordered_map<uint64_t, uint64_t> rebalanceIntervals_;
+
+
 };
 
 // Specializations are required for each MMType
@@ -1231,6 +1257,10 @@ Stats Cache<Allocator>::getStats() const {
   ret.poolUsableSize = aggregate.poolUsableSize;
   ret.poolUnusedBytes = aggregate.freeMemoryBytes();
   ret.anomalyCount = anomalyCount_;
+  ret.rebalanceReqIds = rebalanceReqIds_;
+  ret.anomalyReqIds = anomalyReqIds_;
+  ret.effectiveMovementRates = effectiveMovementRates_;
+  ret.rebalanceIntervals = rebalanceIntervals_;
 
   ret.poolUsageFraction.push_back(usageFraction);
   for (size_t pid = 1; pid < pools_.size(); pid++) {
