@@ -620,6 +620,7 @@ Cache<Allocator>::Cache(const CacheConfig& config,
   allocatorConfig_.poolRebalancerFreeAllocThreshold =
       config_.poolRebalancerFreeAllocThreshold;
   allocatorConfig_.countColdTailHitsOnly = config_.countColdTailHitsOnly;
+  allocatorConfig_.shadowQueueEnabled = config_.shadowQueueEnabled;
   allocatorConfig_.tailSlabCnt = config_.tailSlabCnt;
   allocatorConfig_.enableShardsMrc = config_.enableShardsMrc;
 

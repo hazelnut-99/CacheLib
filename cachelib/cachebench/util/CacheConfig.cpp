@@ -70,6 +70,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, mhMinDiff);
   JSONSetVal(configJson, mhMinDiffRatio);
   JSONSetVal(configJson, countColdTailHitsOnly);
+  JSONSetVal(configJson, shadowQueueEnabled);
   JSONSetVal(configJson, tailSlabCnt);
   JSONSetVal(configJson, enableShardsMrc);
   JSONSetVal(configJson, mhFilterReceiverByEvictionRate);

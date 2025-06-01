@@ -34,6 +34,7 @@
 #include "cachelib/allocator/memory/serialize/gen-cpp2/objects_types.h"
 #include "cachelib/common/CompilerUtils.h"
 #include "cachelib/common/Mutex.h"
+#include "cachelib/common/Hash.h"
 
 namespace facebook::cachelib {
 template <typename MMType>
@@ -307,9 +308,14 @@ class MM2Q {
 
     // adding extra config after generating the config: tailSize
     void addExtraConfig(size_t tSize,
-                        bool coldOnly = false) {
+                        bool coldOnly = false,
+                        bool sqEnabled = false) {
       tailSize = tSize;
       countColdTailHitsOnly = coldOnly;
+      shadowQueueEnabled = sqEnabled;
+      if(shadowQueueEnabled){
+        shadowQueueMaxSize = tSize; // same as tail size, one slab of items
+      }
     }
 
     // threshold value in seconds to compare with a node's update time to
@@ -353,6 +359,10 @@ class MM2Q {
     // when tracking tail hits, count cold count only.
     bool countColdTailHitsOnly{false};
 
+    // Shadow queue config
+    bool shadowQueueEnabled{false};
+    size_t shadowQueueMaxSize{0};
+
     // Minimum interval between reconfigurations. If 0, reconfigure is never
     // called.
     std::chrono::seconds mmReconfigureIntervalSecs{};
@@ -377,12 +387,38 @@ class MM2Q {
     using CompressedPtr = typename T::CompressedPtr;
     using RefFlags = typename T::Flags;
 
+    // --- Shadow Queue Data Structures ---
+    using Key = typename T::Key;
+    using ShadowQueueList = std::list<Key>;
+
+    struct KeyHash {
+      std::size_t operator()(const Key& k) const {
+        if constexpr (std::is_same_v<Key, int>) {
+          return std::hash<int>()(k);
+        } else {
+          static facebook::cachelib::MurmurHash2 hasher;
+          return hasher(k.data(), k.size());
+        }
+      }
+    };
+    struct KeyEqual {
+      bool operator()(const Key& a, const Key& b) const {
+        return a == b;
+      }
+    };
+
+    using ShadowQueueMap = std::unordered_map<Key, typename ShadowQueueList::iterator, KeyHash, KeyEqual>;
+
+    ShadowQueueList shadowQueue_;
+    ShadowQueueMap shadowQueueMap_;
+    // --- Shadow Queue Data Structures ---
+
    public:
     Container() = default;
     Container(Config c, PtrCompressor compressor)
         : lru_(LruType::NumTypes, std::move(compressor)),
           tailTrackingEnabled_(c.tailSize > 0),
-          config_(std::move(c)) {
+          config_(std::move(c)){
       lruRefreshTime_ = config_.lruRefreshTime;
       nextReconfigureTime_ =
           config_.mmReconfigureIntervalSecs.count() == 0
@@ -542,6 +578,7 @@ class MM2Q {
     //       Since we need to always turn on the Tail feature.
     LruType getLruType(const T& node) const noexcept;
 
+
    private:
     // reconfigure the MMContainer: update LRU refresh time according to current
     // tail age
@@ -636,6 +673,9 @@ class MM2Q {
     // - Lastly, adjust Warm and Cold so that their tails are at expected sizes.
     void rebalance() noexcept;
 
+    bool checkAndRemoveFromShadowQueue(const Key& key);
+    void insertToShadowQueue(const Key& key);
+
     // protects all operations on the lru. We never really just read the state
     // of the LRU. Hence we dont really require a RW mutex at this point of
     // time.
@@ -656,6 +696,7 @@ class MM2Q {
     uint64_t numHotTailAccesses_{0};
     uint64_t numWarmTailAccesses_{0};
     uint64_t numColdTailAccesses_{0};
+    uint64_t numShadowAccesses_{0};
 
     // This boolean is to track whether tail tracking is enabled. When we are
     // turning on or off this feature by setting a new tailSize, cold roll is
@@ -922,6 +963,9 @@ template <typename T, MM2Q::Hook<T> T::* HookPtr>
 bool MM2Q::Container<T, HookPtr>::add(T& node) noexcept {
   const auto currTime = static_cast<Time>(util::getCurrentTimeSec());
   return lruMutex_->lock_combine([this, &node, currTime]() {
+    // Check for shadow hit before adding
+    checkAndRemoveFromShadowQueue(node.getKey());
+
     if (node.isInMMContainer()) {
       return false;
     }
@@ -971,6 +1015,7 @@ void MM2Q::Container<T, HookPtr>::removeLocked(T& node,
     rebalance();
   }
 
+  insertToShadowQueue(node.getKey());
   node.unmarkInMMContainer();
   return;
 }
@@ -1160,6 +1205,8 @@ MMContainerStat MM2Q::Container<T, HookPtr>::getStats() const noexcept {
           numWarmTailAccesses_,
           numColdTailAccesses_, 
           numTailAccesses);
+    
+    XLOGF(INFO, "shadow queue hit: {}", numShadowAccesses_);
 
     return MMContainerStat{lru_.size(),
                            tail == nullptr ? 0 : getUpdateTime(*tail),
@@ -1193,4 +1240,43 @@ template <typename T, MM2Q::Hook<T> T::* HookPtr>
 MM2Q::Container<T, HookPtr>::LockedIterator::LockedIterator(
     LockHolder l, const Iterator& iter) noexcept
     : Iterator(iter), l_(std::move(l)) {}
+
+
+template <typename T, MM2Q::Hook<T> T::* HookPtr>
+bool MM2Q::Container<T, HookPtr>::checkAndRemoveFromShadowQueue(const Key& key) {
+  if (!config_.shadowQueueEnabled) {
+    return false;
+  }
+  auto it = shadowQueueMap_.find(key);
+  if (it != shadowQueueMap_.end()) {
+    shadowQueue_.erase(it->second);
+    shadowQueueMap_.erase(it);
+    ++numShadowAccesses_;
+    return true;
+  }
+  return false;
+}
+
+template <typename T, MM2Q::Hook<T> T::* HookPtr>
+void MM2Q::Container<T, HookPtr>::insertToShadowQueue(const Key& key) {
+  if (!config_.shadowQueueEnabled) {
+    return;
+  }
+  auto it = shadowQueueMap_.find(key);
+  if (it != shadowQueueMap_.end()) {
+    shadowQueue_.erase(it->second);
+    shadowQueueMap_.erase(it);
+  }
+  if (shadowQueue_.size() >= config_.shadowQueueMaxSize) {
+    const Key& oldest = shadowQueue_.front();
+    shadowQueueMap_.erase(oldest);
+    shadowQueue_.pop_front();
+  }
+  shadowQueue_.push_back(key);
+  auto listIt = std::prev(shadowQueue_.end());
+  shadowQueueMap_[key] = listIt;
+}
+
+
+
 } // namespace facebook::cachelib

@@ -522,6 +522,9 @@ class CacheAllocatorConfig {
   // when doing tail hits tracking, how many items are considered as the tail.
   unsigned int tailSlabCnt{1};
 
+  // whether to enable shadow queue in MM2Q 
+  bool shadowQueueEnabled{false};
+
   bool enableShardsMrc{false};
 
   // Memory monitoring config
@@ -1188,6 +1191,7 @@ std::map<std::string, std::string> CacheAllocatorConfig<T>::serialize() const {
       util::toString(slabReleaseStuckThreshold);
   configMap["trackTailHits"] = std::to_string(trackTailHits);
   configMap["countColdTailHitsOnly"] = std::to_string(countColdTailHitsOnly);
+  configMap["shadowQueueEnabled"] = std::to_string(shadowQueueEnabled);
   configMap["tailSlabCnt"] = std::to_string(tailSlabCnt); 
   configMap["enableShardsMrc"] = std::to_string(enableShardsMrc);
   // Stringify enum

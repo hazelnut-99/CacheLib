@@ -39,6 +39,8 @@ class MMTypeTest : public testing::Test {
       kMMFlag2 = 2,
     };
 
+    using Key = folly::StringPiece;
+
     explicit Node(int id, std::string key)
         : id_(id), key_(key), inContainer_{false} {}
 

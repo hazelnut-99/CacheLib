@@ -39,6 +39,9 @@ struct MMTypeBench {
       kMMFlag2 = 2,
     };
 
+    using Key = int;
+    Key getKey() const noexcept { return id_; }
+
     explicit Node(int id) : id_(id), inContainer_{false} {}
 
     int getId() const noexcept { return id_; }

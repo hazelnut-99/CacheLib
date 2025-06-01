@@ -4670,7 +4670,7 @@ void CacheAllocator<CacheTrait>::overridePoolConfig(PoolId pid,
                       .getAllocsPerSlab() *
                   config_.tailSlabCnt
             : 0,
-        config_.countColdTailHitsOnly);
+        config_.countColdTailHitsOnly, config_.shadowQueueEnabled);
     DCHECK_NOTNULL(mmContainers_[pid][cid].get());
     mmContainers_[pid][cid]->setConfig(mmConfig);
   }
@@ -4687,7 +4687,7 @@ void CacheAllocator<CacheTrait>::createMMContainers(const PoolId pid,
                       .getAllocsPerSlab() *
                   config_.tailSlabCnt
             : 0,
-        config_.countColdTailHitsOnly);
+        config_.countColdTailHitsOnly, config_.shadowQueueEnabled);
     mmContainers_[pid][cid].reset(new MMContainer(config, compressor_));
     if (config_.enableShardsMrc) {
       poolClassToShards_[pid][cid] = std::unique_ptr<Shards>(Shards::fixedRate(
