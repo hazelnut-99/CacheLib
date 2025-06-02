@@ -422,7 +422,7 @@ class CacheStressor : public Stressor {
               };
 
               folly::dynamic jsonStats = folly::dynamic::object;
-              constexpr std::array<const char*, 8> metrics = {
+              constexpr std::array<const char*, 9> metrics = {
                   "tailAge",
                   "marginalHits",
                   "hits",
@@ -430,7 +430,8 @@ class CacheStressor : public Stressor {
                   "hitsPerSlab",
                   "missEstimation",
                   "numSlabs",
-                  "freeMemory"
+                  "freeMemory",
+                  "shadowHits"
               };
               
               for (const auto& metric : metrics) {

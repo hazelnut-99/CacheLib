@@ -57,6 +57,8 @@ struct Info {
 
   uint64_t accuHotHits{0};
 
+  uint64_t accuShadowHits{0};
+
   // TODO(sugak) this is changed to unblock the LLVM upgrade The fix is not
   // completely understood, but it's a safe change T16521551 - Info() noexcept
   // = default;
@@ -68,8 +70,9 @@ struct Info {
        uint64_t th,
        uint64_t ch,
        uint64_t wh,
-       uint64_t hh) noexcept
-      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh) {}
+       uint64_t hh,
+       uint64_t sh) noexcept
+      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh), accuShadowHits(sh) {}
 
   // number of rounds we hold off for when we acquire a slab.
   static constexpr unsigned int kNumHoldOffRounds = 10;
@@ -166,6 +169,11 @@ struct Info {
            accuColdHits;
   }
 
+  uint64_t getShadowHits(const PoolStats& poolStats) const {
+    return poolStats.cacheStats.at(id).containerStat.numShadowAccesses -
+           accuShadowHits;
+  }
+
   uint64_t getWarmHits(const PoolStats& poolStats) const {
     return poolStats.cacheStats.at(id).containerStat.numWarmAccesses -
            accuWarmHits;
@@ -240,7 +248,10 @@ struct Info {
 
     accuHotHits = cacheStats.containerStat.numHotAccesses;
 
+    accuShadowHits = cacheStats.containerStat.numShadowAccesses;
+
     allocFailures = cacheStats.allocFailures;
+
   }
 };
 } // namespace detail

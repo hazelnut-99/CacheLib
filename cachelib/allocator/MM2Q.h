@@ -1196,7 +1196,7 @@ MMContainerStat MM2Q::Container<T, HookPtr>::getStats() const noexcept {
     XLOGF(DBG,
           "2Q expected tail size: {}, hot tail size: {}, warm tail size: {}, cold tail size: {}\n"
           "hot tail hits: {}, warm tail hits: {}, cold tail hits: {}\n"
-          "weighted numTailAccesses: {}",
+          "weighted numTailAccesses: {}, shadow hit: {}",
           config_.tailSize, 
           lru_.getList(LruType::HotTail).size(),
           lru_.getList(LruType::WarmTail).size(),
@@ -1204,9 +1204,10 @@ MMContainerStat MM2Q::Container<T, HookPtr>::getStats() const noexcept {
           numHotTailAccesses_,
           numWarmTailAccesses_,
           numColdTailAccesses_, 
-          numTailAccesses);
-    
-    XLOGF(INFO, "shadow queue hit: {}", numShadowAccesses_);
+          numTailAccesses,
+          numShadowAccesses_
+        );
+  
 
     return MMContainerStat{lru_.size(),
                            tail == nullptr ? 0 : getUpdateTime(*tail),
@@ -1214,7 +1215,8 @@ MMContainerStat MM2Q::Container<T, HookPtr>::getStats() const noexcept {
                            numHotAccesses_,
                            numColdAccesses_,
                            numWarmAccesses_,
-                           numTailAccesses};
+                           numTailAccesses,
+                           numShadowAccesses_};
   });
 }
 

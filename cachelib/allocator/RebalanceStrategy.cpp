@@ -63,6 +63,7 @@ void RebalanceStrategy::initPoolState(PoolId pid, const PoolStats& stats) {
              stats.cacheStats.at(id).containerStat.numColdAccesses,
              stats.cacheStats.at(id).containerStat.numWarmAccesses,
              stats.cacheStats.at(id).containerStat.numHotAccesses,
+             stats.cacheStats.at(id).containerStat.numShadowAccesses,
             };
   }
 }
@@ -420,6 +421,7 @@ std::map<std::string, std::map<ClassId, double>> RebalanceStrategy::getPoolDelta
       statsMap["tailAge"][classId] = poolEvictionAgeStats.getOldestElementAge(classId);
       statsMap["numSlabs"][classId] = poolStats.numSlabsForClass(classId);
       statsMap["freeMemory"][classId] = poolStats.mpStats.acStats.at(classId).getTotalFreeMemory();
+      statsMap["shadowHits"][classId] = rebalanceInfo.getShadowHits(poolStats);
     }
 
     // Second pass: normalize each metric
