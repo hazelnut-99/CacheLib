@@ -95,6 +95,7 @@ struct Stats {
   std::vector<unsigned int> anomalyReqIds;
   std::vector<double> effectiveMovementRates;
   std::unordered_map<uint64_t, uint64_t> rebalanceIntervals;
+  std::unordered_map<uint64_t, std::tuple<double, uint64_t, uint64_t>> missRatios;
 
   util::PercentileStats::Estimates cacheAllocateLatencyNs;
   util::PercentileStats::Estimates cacheFindLatencyNs;
@@ -156,6 +157,8 @@ struct Stats {
 
   std::map<PoolId, std::vector<std::tuple<ClassId, ClassId, uint64_t>>>
       rebalanceEvents;
+  
+  std::unordered_map<uint64_t, std::string> deltaStats;
 
   // populate the counters related to nvm usage. Cache implementation can decide
   // what to populate since not all of those are interesting when running
@@ -178,26 +181,42 @@ struct Stats {
     json["getMissCnt"] = numCacheGetMiss;
     json["getCnt"] = numCacheGets;
     json["anomalyCount"] = anomalyCount;
-    folly::dynamic rebalanceReqIdsJson = folly::dynamic::array;
-    for (const auto& id : rebalanceReqIds) {
-        rebalanceReqIdsJson.push_back(id);
-    }
-    json["rebalanceReqIds"] = rebalanceReqIdsJson;
-    folly::dynamic anomalyReqIdsJson = folly::dynamic::array;
-    for (const auto& id : anomalyReqIds) {
-        anomalyReqIdsJson.push_back(id);
-    }
-    json["anomalyReqIds"] = anomalyReqIdsJson;
-    json["effectiveMovementRates"] = folly::dynamic::array;
-    for (const auto& rate : effectiveMovementRates) {
-      json["effectiveMovementRates"].push_back(rate);
-    }
+    
+    auto vecToDynamicArray = [](const auto& vec) {
+      folly::dynamic arr = folly::dynamic::array;
+      for (const auto& v : vec) {
+        arr.push_back(v);
+      }
+      return arr;
+    };
 
-    folly::dynamic rebalanceIntervalsJson = folly::dynamic::object;
-    for (const auto& [requestId, interval] : rebalanceIntervals) {
-        rebalanceIntervalsJson[folly::to<std::string>(requestId)] = interval;
+    json["rebalanceReqIds"] = vecToDynamicArray(rebalanceReqIds);
+    json["anomalyReqIds"] = vecToDynamicArray(anomalyReqIds);
+    json["effectiveMovementRates"] = vecToDynamicArray(effectiveMovementRates);
+
+    auto mapToDynamicObject = [](const auto& map) {
+      folly::dynamic obj = folly::dynamic::object;
+      for (const auto& [k, v] : map) {
+        obj[folly::to<std::string>(k)] = v;
+      }
+      return obj;
+    };
+
+    folly::dynamic missRatiosJson = folly::dynamic::object;
+    for (const auto& [reqId, tup] : missRatios) {
+        folly::dynamic entry = folly::dynamic::object;
+        entry["missRatio"] = std::get<0>(tup);
+        entry["missDelta"] = std::get<1>(tup);
+        entry["reqDelta"] = std::get<2>(tup);
+        missRatiosJson[folly::to<std::string>(reqId)] = entry;
     }
+    json["missRatios"] = missRatiosJson;
+
+    folly::dynamic rebalanceIntervalsJson = mapToDynamicObject(rebalanceIntervals);
     json["rebalanceIntervals"] = rebalanceIntervalsJson;
+
+    folly::dynamic deltaStatsJson = mapToDynamicObject(deltaStats);
+    json["deltaStats"] = deltaStatsJson;
 
     json["getMissRatio"] = invertPctFn(numCacheGetMiss, numCacheGets);
     json["poolUsableSize"] = poolUsableSize;  

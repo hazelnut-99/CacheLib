@@ -82,7 +82,7 @@ class CACHELIB_PACKED_ATTR Slab {
   // minimum of 64 byte allocations.
   static constexpr unsigned int kMinAllocPower = 6;
   static constexpr size_t kMinAllocSize = 1 << kMinAllocPower;
-
+ 
   static constexpr size_t kSize = 1 << kNumSlabBits;
 
   // returns pointer to the memory at the offset inside the slab memory.

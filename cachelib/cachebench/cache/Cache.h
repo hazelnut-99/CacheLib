@@ -350,6 +350,10 @@ class Cache {
     return cache_->isLastRebalanceThrashing(pid);
   }
 
+  bool allSlabsAllocated(PoolId pid) const {
+    return cache_->getPool(pid).allSlabsAllocated();
+  }
+
   void incrAnomalyCount() {
     anomalyCount_ += 1;
   }
@@ -368,7 +372,15 @@ class Cache {
 
   void addRebalanceInterval(uint64_t requestId, uint64_t rebalanceInterval) {
     rebalanceIntervals_[requestId] = rebalanceInterval;
-}
+  }
+
+  void recordMissRatios(uint64_t requestId, double missRatio, uint64_t missDelta, uint64_t reqDelta) {
+    missRatios_[requestId] = std::make_tuple(missRatio, missDelta, reqDelta);
+  }
+
+  void recordDeltaStats(uint64_t requestId, std::string statsStr) {
+    deltaStats_[requestId] = statsStr;
+  }
 
   std::map<std::string, std::map<ClassId, double>> getPoolDeltaStats(
       PoolId pid) {
@@ -534,6 +546,10 @@ class Cache {
   std::vector<double> effectiveMovementRates_;
 
   std::unordered_map<uint64_t, uint64_t> rebalanceIntervals_;
+
+  std::unordered_map<uint64_t, std::tuple<double, uint64_t, uint64_t>> missRatios_;
+
+  std::unordered_map<uint64_t, std::string> deltaStats_;
 
 
 };
@@ -1261,6 +1277,8 @@ Stats Cache<Allocator>::getStats() const {
   ret.anomalyReqIds = anomalyReqIds_;
   ret.effectiveMovementRates = effectiveMovementRates_;
   ret.rebalanceIntervals = rebalanceIntervals_;
+  ret.missRatios = missRatios_;
+  ret.deltaStats = deltaStats_;
 
   ret.poolUsageFraction.push_back(usageFraction);
   for (size_t pid = 1; pid < pools_.size(); pid++) {

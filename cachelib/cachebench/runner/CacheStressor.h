@@ -99,8 +99,9 @@ class CacheStressor : public Stressor {
     }
 
     wakeUpRebalancerEveryXReqs_ = cacheConfig.wakeUpRebalancerEveryXReqs;
+    rebalanceIntervalInUse_ = wakeUpRebalancerEveryXReqs_;
+    minRebalanceInterval_ = wakeUpRebalancerEveryXReqs_;
     anomalyDetectionFrequency_ = cacheConfig.anomalyDetectionFrequency;
-    rebalanceIntervalInUse_ = cacheConfig.wakeUpRebalancerEveryXReqs;
     useAdaptiveRebalanceInterval_ = cacheConfig.useAdaptiveRebalanceInterval;
     useAdaptiveRebalanceIntervalV2_ =
         cacheConfig.useAdaptiveRebalanceIntervalV2;
@@ -120,8 +121,6 @@ class CacheStressor : public Stressor {
       cacheConfig.poolRebalanceIntervalSec = 31104000; // 1 year
       cacheConfig.poolRebalancerDisableForcedWakeUp = true;
     }
-
-
 
     if (cacheConfig.useTraceTimeStamp &&
         cacheConfig.tickerSynchingSeconds > 0) {
@@ -337,7 +336,7 @@ class CacheStressor : public Stressor {
 
     std::optional<uint64_t> lastRequestId = std::nullopt;
     std::optional<uint64_t> lastRequestTs = std::nullopt;
-    cache_->addRebalanceInterval(0, rebalanceIntervalInUse_);
+    updateRebalanceInterval(0, rebalanceIntervalInUse_);
     for (uint64_t i = 0;
          i < config_.numOps &&
          cache_->getInconsistencyCount() < config_.maxInconsistencyCount &&
@@ -392,7 +391,7 @@ class CacheStressor : public Stressor {
               }
 
               double missRatio = totalGetDelta > 0 ? static_cast<double>(totalMissDelta) / totalGetDelta : 0.0;
-
+              cache_->recordMissRatios(i, missRatio, totalMissDelta, totalGetDelta);
               // Log the result in JSON format
               XLOGF(DBG, "miss_ratio_logging: {{\"i\": {}, \"miss_ratio\": {}}}", i, missRatio);
               
@@ -433,6 +432,8 @@ class CacheStressor : public Stressor {
                   "freeMemory"
               };
               
+              bool allSlabsAllocated = cache_->allSlabsAllocated(pid);
+              
               for (const auto& metric : metrics) {
                   auto it = rawStats.find(metric);
                   if (it != rawStats.end()) {
@@ -442,24 +443,23 @@ class CacheStressor : public Stressor {
             
               if (!jsonStats.empty()) {
                 jsonStats["request_id"] = i;
-                  XLOGF(DBG, "Delta_statistics_logging: {}", folly::toJson(jsonStats));
+                jsonStats["allSlabsAllocated"] = allSlabsAllocated;
+                XLOGF(DBG, "Delta_statistics_logging: {}", folly::toJson(jsonStats));
+                //cache_->recordDeltaStats(i, folly::toJson(jsonStats));
               }
+              
 
-              if (!rawStats.empty() && rawStats.find("marginalHits") != rawStats.end()) {
+              if (allSlabsAllocated && !rawStats.empty() && rawStats.find("marginalHits") != rawStats.end()) {
                 double cv = coefficientOfVariation(rawStats["marginalHits"]);
                 bool anomaly1 = ewma_.update(cv);
                 bool anomaly2 = ewmaDelta_.update(cv - lastCV_);
                 if((anomaly1 || anomaly2) && useAnomalyDetection_) {
-                    const auto oldInterval = rebalanceIntervalInUse_;
-                    rebalanceIntervalInUse_ = wakeUpRebalancerEveryXReqs_;
-                    cache_->addRebalanceInterval(i, rebalanceIntervalInUse_);
-                    XLOGF(INFO, "Rebalance interval adjusted due to anomaly: from {} to {}, request_id: {}", oldInterval, rebalanceIntervalInUse_, i);
+                    auto newInterval = minRebalanceInterval_;
+                    XLOG(INFO, "Rebalance interval adjusted due to anomaly");
+                    updateRebalanceInterval(i, newInterval);
                     cache_->clearRebalancerPoolEventMap(pid);
                     cache_->incrAnomalyCount();
                     cache_->addAnomayRequestId(i);
-                    if(useAdaptiveRebalanceIntervalV2_) {
-                      useAnomalyDetection_ = false;
-                    }
                 }
                 lastCV_ = cv;
               }
@@ -468,8 +468,7 @@ class CacheStressor : public Stressor {
 
         if(resetIntervalTimings_.count(i) > 0) {
           XLOGF(INFO, "Resetting interval timings at i = {}", i);
-          rebalanceIntervalInUse_ = wakeUpRebalancerEveryXReqs_;
-          cache_->addRebalanceInterval(i, rebalanceIntervalInUse_);
+          updateRebalanceInterval(i, wakeUpRebalancerEveryXReqs_);
           cache_->clearRebalancerPoolEventMap(pid);
         }
 
@@ -482,29 +481,24 @@ class CacheStressor : public Stressor {
           double emr = cache_->getEffectiveMovementRate(pid);
           //cache_->addEffectiveMovementRate(emr);
         
-          if (useAdaptiveRebalanceInterval_) {
-            bool thrashingDected = cache_->checkForRebalanceThrashing(pid);
+          if (useAdaptiveRebalanceInterval_ || useAdaptiveRebalanceIntervalV2_) {
             auto rebalanceEventCount = cache_->getRebalancerPoolEventCount(pid);
-            if (thrashingDected && rebalanceEventCount > 4) {
-              XLOGF(INFO, "Effective movement rate is low, increasing "
-                        "the rebalance interval, from {} : {}", rebalanceIntervalInUse_, rebalanceIntervalInUse_ * increaseIntervalFactor_);
-              rebalanceIntervalInUse_ *= increaseIntervalFactor_;
-              cache_->addRebalanceInterval(i, rebalanceIntervalInUse_);
+            double effectiveMoveRate = cache_->getEffectiveMovementRate(pid);
+            //v2: MD
+            if(useAdaptiveRebalanceIntervalV2_ && effectiveMoveRate >= 0.9 && rebalanceEventCount > 4){
+              auto newInterval = std::max<uint64_t>(rebalanceIntervalInUse_ / increaseIntervalFactor_, 1);
+              XLOGF(INFO, "Effective movement rate is high ({}, {}), decreasing "
+                        "the rebalance interval, from {} : {}", effectiveMoveRate, rebalanceEventCount, rebalanceIntervalInUse_, newInterval);
+              updateRebalanceInterval(i, newInterval);
               cache_->clearRebalancerPoolEventMap(pid);
             }
-          }
-
-          if (useAdaptiveRebalanceIntervalV2_) {
-            auto rebalanceEventCount = cache_->getRebalancerPoolEventCount(pid);
-            auto effectiveMoveRate = cache_->getEffectiveMovementRate(pid);
-            if(rebalanceEventCount == 20 && effectiveMoveRate <= 0.05) {
-              XLOGF(INFO, "Effective movement rate is too low, stop the rebalancer");
-              rebalanceIntervalInUse_ = std::numeric_limits<uint64_t>::max();
-              cache_->addRebalanceInterval(i, rebalanceIntervalInUse_);
+            //v1: MI
+            if (effectiveMoveRate < 0.5 && rebalanceEventCount > 4) {
+              XLOGF(INFO, "Effective movement rate is low ({}, {}), increasing "
+                        "the rebalance interval, from {} : {}", effectiveMoveRate, rebalanceEventCount, rebalanceIntervalInUse_, rebalanceIntervalInUse_ * increaseIntervalFactor_);
+              auto newInterval = rebalanceIntervalInUse_ * increaseIntervalFactor_;
+              updateRebalanceInterval(i, newInterval);
               cache_->clearRebalancerPoolEventMap(pid);
-              useAnomalyDetection_ = true;
-              ewma_.reset();
-              ewmaDelta_.reset(); 
             }
           }
 
@@ -798,6 +792,16 @@ double coefficientOfVariation(const std::map<ClassId, double>& values) {
   return stdDev / mean;
 }
 
+
+void updateRebalanceInterval(uint64_t requestId, uint64_t newInterval) {
+    XLOGF(INFO, "Rebalance interval updated from {} to {} at request id {}", rebalanceIntervalInUse_, newInterval, requestId);
+    rebalanceIntervalInUse_ = newInterval; 
+    cache_->addRebalanceInterval(requestId, rebalanceIntervalInUse_);
+    if(rebalanceIntervalInUse_ < minRebalanceInterval_) {
+      minRebalanceInterval_ = rebalanceIntervalInUse_;
+    }
+}
+
   const StressorConfig config_; // config for the stress run
 
   std::vector<ThroughputStats> throughputStats_; // thread local stats
@@ -849,6 +853,8 @@ double coefficientOfVariation(const std::map<ClassId, double>& values) {
   uint64_t anomalyDetectionFrequency_{0};
 
   uint64_t rebalanceIntervalInUse_;
+
+  uint64_t minRebalanceInterval_;
 
   bool useAdaptiveRebalanceInterval_;
 

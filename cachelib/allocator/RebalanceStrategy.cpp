@@ -399,11 +399,6 @@ std::map<std::string, std::map<ClassId, double>> RebalanceStrategy::getPoolDelta
       return {};
     }
 
-    if (!cache.getPool(pid).allSlabsAllocated()) {
-      recordCurrentState(pid, poolStats);
-      return {};
-    }
-
     auto classesSet = poolStats.getClassIds();
     auto& poolState = getPoolState(pid);
     const auto poolEvictionAgeStats = cache.getPoolEvictionAgeStats(pid, 0);
