@@ -29,6 +29,7 @@
 #include "cachelib/cachebench/util/Request.h"
 #include "cachelib/cachebench/workload/ReplayGeneratorBase.h"
 #include "cachelib/cachebench/workload/ZstdReader.h"
+#include "cachelib/allocator/memory/Slab.h"
 
 namespace facebook {
 namespace cachelib {
@@ -150,6 +151,7 @@ class OGBinaryReplayGenerator : public ReplayGeneratorBase {
   static constexpr uint64_t checkIntervalUs_ = 100;
   static constexpr size_t kMaxRequests = 10000;
   static constexpr size_t kMinKeySize = 16;
+  static constexpr size_t maxSlabSize = 1ULL << facebook::cachelib::Slab::kNumSlabBits;
 
   using ReqQueue = folly::ProducerConsumerQueue<std::unique_ptr<OGReqWrapper>>;
 
@@ -249,7 +251,7 @@ inline bool OGBinaryReplayGenerator::parseRequest(
     req->req_.timestamp = timestampSeconds;
   }
 
-  size_t chunkSize = 1024 * 1024; // 1 MB
+  size_t chunkSize = 1 * 1024 * 1024; // 1 MB
   size_t objSize = sizeField.value();
 
   if (objSize > chunkSize) {
@@ -286,6 +288,7 @@ inline bool OGBinaryReplayGenerator::parseRequest(
 
 inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternal() {
   auto reqWrapper = std::make_unique<OGReqWrapper>();
+
   do {
     std::string line;
     traceStream_.getline(line); // can throw
@@ -295,6 +298,13 @@ inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternal() {
       XLOG_N_PER_MS(ERR, 10, 1000) << folly::sformat(
           "Parsing error (total {}): {}", parseError.load(), line);
     } else {
+      size_t totalSize = std::accumulate(
+          reqWrapper->sizes_.begin(), reqWrapper->sizes_.end(), size_t(0));
+      totalSize += reqWrapper->key_.length() + 32;
+
+      if (config_.ignoreLargeReq && totalSize >= maxSlabSize) {
+          return getReqInternal();
+      }
       parseSuccess++;
     }
   } while (reqWrapper->repeats_ == 0);
@@ -304,7 +314,7 @@ inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternal() {
 
 inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternalZstd() {
   auto reqWrapper = std::make_unique<OGReqWrapper>();
-  size_t chunkSize = 1024 * 1024; // 1 MB
+  size_t chunkSize = 1 * 1024 * 1024; // 1 MB
 
   do {
     OracleGeneralBinRequest req;
@@ -313,6 +323,10 @@ inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternalZstd
     }
 
     reqWrapper->key_ = std::to_string(req.objId);
+    if (config_.ignoreLargeReq &&
+      (req.objSize + reqWrapper->key_.length() + 32) >= maxSlabSize) {
+      return getReqInternalZstd();
+    }
 
     if (req.objSize > chunkSize) {
       size_t numChunks = (req.objSize + chunkSize - 1) / chunkSize; 

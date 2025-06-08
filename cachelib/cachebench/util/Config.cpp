@@ -57,6 +57,7 @@ StressorConfig::StressorConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, traceFileName);
   JSONSetVal(configJson, traceFileNames);
   JSONSetVal(configJson, zstdTrace);
+  JSONSetVal(configJson, ignoreLargeReq);
   JSONSetVal(configJson, configPath);
 
   JSONSetVal(configJson, cachePieceSize);

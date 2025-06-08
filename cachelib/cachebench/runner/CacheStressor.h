@@ -447,9 +447,10 @@ class CacheStressor : public Stressor {
                 XLOGF(DBG, "Delta_statistics_logging: {}", folly::toJson(jsonStats));
                 //cache_->recordDeltaStats(i, folly::toJson(jsonStats));
               }
-              
+
 
               if (allSlabsAllocated && !rawStats.empty() && rawStats.find("marginalHits") != rawStats.end()) {
+                double speedOfChange = maxMinDiffOverAnomalyFreq(rawStats["marginalHits"]);
                 double cv = coefficientOfVariation(rawStats["marginalHits"]);
                 bool anomaly1 = ewma_.update(cv);
                 bool anomaly2 = ewmaDelta_.update(cv - lastCV_);
@@ -764,6 +765,19 @@ class CacheStressor : public Stressor {
     }
 
     return result;
+}
+
+double maxMinDiffOverAnomalyFreq(const std::map<ClassId, double>& values) const {
+    if (values.empty() || anomalyDetectionFrequency_ == 0) {
+        return 0.0;
+    }
+    std::vector<double> extractedValues;
+    for (const auto& [classId, value] : values) {
+        extractedValues.push_back(value);
+    }
+    auto [minIt, maxIt] = std::minmax_element(extractedValues.begin(), extractedValues.end());
+    double diff = *maxIt - *minIt;
+    return diff / static_cast<double>(anomalyDetectionFrequency_);
 }
 
 double coefficientOfVariation(const std::map<ClassId, double>& values) {
