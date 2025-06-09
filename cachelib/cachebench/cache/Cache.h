@@ -627,6 +627,9 @@ Cache<Allocator>::Cache(const CacheConfig& config,
   //     config_.rebalanceStrategy == "hits-per-tail-slab") {
   //       allocatorConfig_.enableTailHitsTracking();
   // }
+  if (config_.rebalanceStrategy == "lama") {
+    allocatorConfig_.enableFootPrintMrc = true;
+  }
   XLOGF(INFO, "Using rebalance interval: {}", config_.poolRebalanceIntervalSec);
   allocatorConfig_.enablePoolRebalancing(
       config_.getRebalanceStrategy(),

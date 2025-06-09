@@ -524,6 +524,8 @@ class CacheAllocatorConfig {
 
   bool enableShardsMrc{false};
 
+  bool enableFootPrintMrc{false};
+
   // Memory monitoring config
   MemoryMonitor::Config memMonitorConfig;
 
@@ -1190,6 +1192,7 @@ std::map<std::string, std::string> CacheAllocatorConfig<T>::serialize() const {
   configMap["countColdTailHitsOnly"] = std::to_string(countColdTailHitsOnly);
   configMap["tailSlabCnt"] = std::to_string(tailSlabCnt); 
   configMap["enableShardsMrc"] = std::to_string(enableShardsMrc);
+  configMap["enableFootPrintMrc"] = std::to_string(enableFootPrintMrc);
   // Stringify enum
   switch (memMonitorConfig.mode) {
   case MemoryMonitor::FreeMemory:
@@ -1293,6 +1296,8 @@ std::string CacheAllocatorConfig<T>::stringifyRebalanceStrategy(
     return "Random";
   case RebalanceStrategy::HitsPerTailSlab:
     return "HitsPerTailSlab";
+  case RebalanceStrategy::LAMA:
+    return "LAMA";
   case RebalanceStrategy::MarginalHits:
     return "MarginalHits";
   case RebalanceStrategy::FreeMem:

@@ -81,6 +81,7 @@
 #include "cachelib/common/Throttler.h"
 #include "cachelib/common/Time.h"
 #include "cachelib/common/Utils.h"
+#include "cachelib/common/FootprintMRC.h"
 #include "cachelib/shm/ShmManager.h"
 
 namespace facebook::cachelib {
@@ -999,7 +1000,9 @@ class CacheAllocator : public CacheBase {
                               unsigned int freeAllocThreshold);
 
   std::map<uint64_t, double> queryShardsMrc(PoolId pid,
-                                            ClassId cid) const override;
+                                            ClassId cid) const override; 
+  
+  const FootprintMRC* getFootprintMrcForPool(PoolId) const override;                                                                      
 
   std::unordered_map<uint64_t, uint64_t> queryShardsHistogram(
       PoolId pid, ClassId cid) const override;
@@ -2256,6 +2259,8 @@ class CacheAllocator : public CacheBase {
   // check whether a pool is a slabs pool
   std::array<bool, MemoryPoolManager::kMaxPools> isCompactCachePool_{};
 
+  std::unordered_map<PoolId, FootprintMRC> footprintMRCs_;
+
   // lock to serilize access of isCompactCachePool_ array, including creation of
   // compact cache pools
   mutable folly::SharedMutex compactCachePoolsLock_;
@@ -3373,6 +3378,11 @@ void CacheAllocator<CacheTrait>::insertInMMContainer(Item& item) {
     poolClassToShards_[allocInfo.poolId][allocInfo.classId]->feed(
         HashedKey(item.getKey()));
   }
+  if (config_.enableFootPrintMrc){
+    const auto allocInfo =
+        allocator_->getAllocInfo(static_cast<const void*>(&item));
+    footprintMRCs_[allocInfo.poolId].feed(item.getKey(), allocInfo.classId);
+  }
 }
 
 /**
@@ -4253,6 +4263,10 @@ bool CacheAllocator<CacheTrait>::recordAccessInMMContainer(Item& item,
         HashedKey(item.getKey()));
   }
 
+  if(config_.enableFootPrintMrc) {
+    footprintMRCs_[allocInfo.poolId].feed(item.getKey(), allocInfo.classId);
+  }
+
   // track recently accessed items if needed
   if (UNLIKELY(config_.trackRecentItemsForDump)) {
     ring_->trackItem(reinterpret_cast<uintptr_t>(&item), item.getSize());
@@ -4513,6 +4527,9 @@ PoolId CacheAllocator<CacheTrait>::addPool(
     bool ensureProvisionable) {
   std::unique_lock w(poolsResizeAndRebalanceLock_);
   auto pid = allocator_->addPool(name, size, allocSizes, ensureProvisionable);
+  if(config_.enableFootPrintMrc) {
+    footprintMRCs_[pid] = FootprintMRC();
+  }
   createMMContainers(pid, std::move(config));
   setRebalanceStrategy(pid, std::move(rebalanceStrategy));
   setResizeStrategy(pid, std::move(resizeStrategy));
@@ -4553,6 +4570,15 @@ void CacheAllocator<CacheTrait>::wakeupPoolRebalancer(bool synchronous,
 }
 
 template <typename CacheTrait>
+const FootprintMRC* CacheAllocator<CacheTrait>::getFootprintMrcForPool(PoolId pid) const {
+  if(!config_.enableFootPrintMrc) {
+    return nullptr;
+  }
+  auto it = footprintMRCs_.find(pid);
+  return it != footprintMRCs_.end() ? &it->second : nullptr;
+}
+
+template <typename CacheTrait>
 std::map<uint64_t, double> CacheAllocator<CacheTrait>::queryShardsMrc(
     PoolId pid, ClassId cid) const {
   if (!config_.enableShardsMrc) {
@@ -4572,6 +4598,7 @@ std::map<uint64_t, double> CacheAllocator<CacheTrait>::queryShardsMrc(
 
   return classIt->second->mrc();
 }
+
 
 template <typename CacheTrait>
 std::unordered_map<uint64_t, uint64_t>

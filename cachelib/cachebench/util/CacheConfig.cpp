@@ -19,6 +19,7 @@
 #include "cachelib/allocator/FreeMemStrategy.h"
 #include "cachelib/allocator/HitsPerSlabStrategy.h"
 #include "cachelib/allocator/HitsPerTailSlabStrategy.h"
+#include "cachelib/allocator/LAMAStrategy.h"
 #include "cachelib/allocator/LruTailAgeStrategy.h"
 #include "cachelib/allocator/MarginalHitsStrategy.h"
 #include "cachelib/allocator/RandomStrategy.h"
@@ -78,6 +79,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, mhAutoIncThreshold);
   JSONSetVal(configJson, mhMinModelSampleSize);
   JSONSetVal(configJson, mhBufferSize);
+  JSONSetVal(configJson, lamaMinThreshold);
 
 
   JSONSetVal(configJson, htBucketPower);
@@ -162,7 +164,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   // if you added new fields to the configuration, update the JSONSetVal
   // to make them available for the json configs and increment the size
   // below
-  checkCorrectSize<CacheConfig, 1000>();
+  checkCorrectSize<CacheConfig, 1008>();
 
   if (numPools != poolSizes.size()) {
     throw std::invalid_argument(folly::sformat(
@@ -234,6 +236,10 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
   } else if (rebalanceStrategy == "default") {
     // the default strategy, only rebalance when allocation failures happen.
     return std::make_shared<RebalanceStrategy>();
+  } else if (rebalanceStrategy == "lama") {
+    LAMAStrategy::Config lamaConfig;
+    lamaConfig.missRatioImprovementThreshold = lamaMinThreshold;
+    return std::make_shared<LAMAStrategy>(lamaConfig);
   } else {
     // use random strategy (custom impl)
     return std::make_shared<RandomStrategyNew>(RandomStrategyNew::Config{

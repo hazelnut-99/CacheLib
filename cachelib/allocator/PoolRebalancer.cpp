@@ -168,15 +168,25 @@ bool PoolRebalancer::tryRebalancing(PoolId pid, RebalanceStrategy& strategy, uin
   auto end = util::getCurrentTimeMs();
   pickVictimStats_.recordLoopTime(end > currentTimeSec ? end - currentTimeSec
                                                        : 0);
-
-  if (context.victimClassId == Slab::kInvalidClassId) {
-    XLOGF(DBG,
-          "Pool Id: {} rebalancing strategy didn't find an victim",
-          static_cast<int>(pid));
-    return false;
-  }
   currentTimeSec = util::getCurrentTimeMs();
-  releaseSlab(pid, context.victimClassId, context.receiverClassId, request_id);
+  if (!context.victimReceiverPairs.empty()) {
+      // If victim is valid, perform releaseSlab for each pair, to support lama
+      for (const auto& pair : context.victimReceiverPairs) {
+          if (pair.first != Slab::kInvalidClassId && pair.second != Slab::kInvalidClassId) {
+              releaseSlab(pid, pair.first, pair.second, request_id);
+          }
+      }
+  } else {
+      // Previous logic for single victim/receiver
+      if (context.victimClassId == Slab::kInvalidClassId) {
+          XLOGF(DBG,
+                "Pool Id: {} rebalancing strategy didn't find an victim",
+                static_cast<int>(pid));
+          return false;
+      }
+      releaseSlab(pid, context.victimClassId, context.receiverClassId, request_id);
+  }
+  
   end = util::getCurrentTimeMs();
   releaseStats_.recordLoopTime(end > currentTimeSec ? end - currentTimeSec : 0);
   rebalanceStats_.recordLoopTime(end > begin ? end - begin : 0);

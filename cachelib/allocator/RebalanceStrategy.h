@@ -28,6 +28,8 @@ struct RebalanceContext {
   ClassId victimClassId{Slab::kInvalidClassId};
   ClassId receiverClassId{Slab::kInvalidClassId};
 
+  std::vector<std::pair<ClassId, ClassId>> victimReceiverPairs{};
+
   double diffValue{0.0};
   double deltaDiffValue{0.0};
 
@@ -38,10 +40,25 @@ struct RebalanceContext {
   RebalanceContext(ClassId victim, ClassId receiver)
       : victimClassId(victim), receiverClassId(receiver) {}
   
+  explicit RebalanceContext(const std::vector<std::pair<ClassId, ClassId>>& pairs)
+      : victimReceiverPairs(pairs) {}
+  
   bool isEffective() const {
-    return !(victimClassId == Slab::kInvalidClassId ||
-              receiverClassId == Slab::kInvalidClassId ||
-              victimClassId == receiverClassId);
+    auto isPairEffective = [](ClassId victim, ClassId receiver) {
+      return victim != Slab::kInvalidClassId &&
+            receiver != Slab::kInvalidClassId &&
+            victim != receiver;
+    };
+
+    bool singleEffective = isPairEffective(victimClassId, receiverClassId);
+
+    bool pairEffective = std::any_of(
+        victimReceiverPairs.begin(), victimReceiverPairs.end(),
+        [&](const std::pair<ClassId, ClassId>& p) {
+          return isPairEffective(p.first, p.second);
+        });
+
+    return singleEffective || pairEffective;
   }
 };
 
@@ -64,6 +81,7 @@ class RebalanceStrategy {
     HitsPerSlab,
     HitsPerTailSlab,
     LruTailAge,
+    LAMA,
     PoolResize,
     StressRebalance,
     NumTypes

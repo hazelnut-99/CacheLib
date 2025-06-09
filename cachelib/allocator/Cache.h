@@ -27,6 +27,7 @@
 #include "cachelib/allocator/memory/MemoryAllocator.h"
 #include "cachelib/common/Hash.h"
 #include "cachelib/common/Utils.h"
+#include "cachelib/common/FootprintMRC.h"
 
 namespace facebook {
 namespace cachelib {
@@ -104,6 +105,10 @@ class CacheBase {
 
   virtual std::map<uint64_t, double> queryShardsMrc(PoolId, ClassId) const {
     return {};
+  }
+
+  virtual const FootprintMRC* getFootprintMrcForPool(PoolId) const {
+      return nullptr;
   }
 
   virtual std::unordered_map<uint64_t, uint64_t> queryShardsHistogram(PoolId, ClassId) const {

@@ -120,6 +120,8 @@ struct CacheConfig : public JSONConfig {
   unsigned int mhMinModelSampleSize{30};
   unsigned int mhBufferSize{30};
 
+  double lamaMinThreshold{0.005};
+
   bool mhEnableHoldOff{false};
   bool countColdTailHitsOnly{false};
   unsigned int tailSlabCnt{1};
