@@ -51,20 +51,6 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     return kNoOpContext;
   }
 
-  if (config.autoIncThreshold || config.autoDecThreshold) {
-    bool thrashingDetected = checkForThrashing(pid);
-    auto eventQueueSize = getRebalanceEventQueueSize(pid);
-    if (thrashingDetected && config.autoIncThreshold) {
-      XLOGF(INFO, "min diff value in the queue: {}",
-            getMinDiffValueFromRebalanceEvents(pid));
-      increaseRebalanceThreshold(getMinDiffValueFromRebalanceEvents(pid));
-      clearPoolRebalanceEvent(pid);
-    } else if (!thrashingDetected && config.autoDecThreshold 
-      && (eventQueueSize == 0 || queryEffectiveMoveRate(pid) >= 0.8)) {
-      decreaseRebalanceThreshold();
-    }
-  }
-
   XLOGF(DBG, "rebalance_threshold: {}", minDiffInUse_);
 
   auto scores = computeClassMarginalHits(pid, poolStats, config.tailSlabCnt);
@@ -181,7 +167,8 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
     ctx.deltaDiffValue = lastDiffs_[pid] - ctx.diffValue;
     lastDiffs_[pid] = ctx.diffValue;
     ctx.normalizedRange = computeNormalizedMarginalHitsRange(scores);
-    recordRebalanceEvent(pid, ctx);
+    // size of the queue is twice as the number of classes
+    recordRebalanceEvent(pid, ctx, classes.size() * 2);
     if (config.enableHoldOff) {
       poolState[ctx.receiverClassId].startVictimHoldOff();
       poolState[ctx.victimClassId].startReceiverHoldOff();
@@ -198,6 +185,20 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
 
     std::string jsonString = folly::toJson(logData);
     XLOGF(DBG, "Marginal-hits-decision: {}", jsonString);
+
+    if (config.autoIncThreshold || config.autoDecThreshold) {
+      double emr = queryEffectiveMoveRate(pid);
+      auto eventQueueSize = getRebalanceEventQueueSize(pid);
+      if (emr < 0.5 && config.autoIncThreshold) {
+        XLOGF(INFO, "min diff value in the queue: {}",
+              getMinDiffValueFromRebalanceEvents(pid));
+        increaseRebalanceThreshold(getMinDiffValueFromRebalanceEvents(pid));
+        clearPoolRebalanceEvent(pid);
+      } else if (emr >= 0.95 && config.autoDecThreshold && eventQueueSize >= poolStats.getClassIds().size()) {
+        decreaseRebalanceThreshold();
+        clearPoolRebalanceEvent(pid);
+      }
+    }
   }
 
   if (ctx.isEffective() && config.enableOnlineLearning) {

@@ -336,7 +336,7 @@ class CacheStressor : public Stressor {
 
     std::optional<uint64_t> lastRequestId = std::nullopt;
     std::optional<uint64_t> lastRequestTs = std::nullopt;
-    updateRebalanceInterval(0, rebalanceIntervalInUse_);
+    updateRebalanceInterval(0, rebalanceIntervalInUse_, "init");
     for (uint64_t i = 0;
          i < config_.numOps &&
          cache_->getInconsistencyCount() < config_.maxInconsistencyCount &&
@@ -452,12 +452,13 @@ class CacheStressor : public Stressor {
               if (allSlabsAllocated && !rawStats.empty() && rawStats.find("marginalHits") != rawStats.end()) {
                 double speedOfChange = maxMinDiffOverAnomalyFreq(rawStats["marginalHits"]);
                 double cv = coefficientOfVariation(rawStats["marginalHits"]);
+                cache_->recordMhCV(i, cv);
                 bool anomaly1 = ewma_.update(cv);
                 bool anomaly2 = ewmaDelta_.update(cv - lastCV_);
                 if((anomaly1 || anomaly2) && useAnomalyDetection_) {
                     auto newInterval = minRebalanceInterval_;
                     XLOG(INFO, "Rebalance interval adjusted due to anomaly");
-                    updateRebalanceInterval(i, newInterval);
+                    updateRebalanceInterval(i, newInterval, "reset");
                     cache_->clearRebalancerPoolEventMap(pid);
                     cache_->incrAnomalyCount();
                     cache_->addAnomayRequestId(i);
@@ -469,7 +470,7 @@ class CacheStressor : public Stressor {
 
         if(resetIntervalTimings_.count(i) > 0) {
           XLOGF(INFO, "Resetting interval timings at i = {}", i);
-          updateRebalanceInterval(i, wakeUpRebalancerEveryXReqs_);
+          updateRebalanceInterval(i, wakeUpRebalancerEveryXReqs_, "reset");
           cache_->clearRebalancerPoolEventMap(pid);
         }
 
@@ -486,19 +487,19 @@ class CacheStressor : public Stressor {
             auto rebalanceEventCount = cache_->getRebalancerPoolEventCount(pid);
             double effectiveMoveRate = cache_->getEffectiveMovementRate(pid);
             //v2: MD
-            if(useAdaptiveRebalanceIntervalV2_ && effectiveMoveRate >= 0.9 && rebalanceEventCount > 4){
+            if(useAdaptiveRebalanceIntervalV2_ && effectiveMoveRate >= 0.95 && rebalanceEventCount >= cache_->getNumClassId(pid)){
               auto newInterval = std::max<uint64_t>(rebalanceIntervalInUse_ / increaseIntervalFactor_, 1);
               XLOGF(INFO, "Effective movement rate is high ({}, {}), decreasing "
                         "the rebalance interval, from {} : {}", effectiveMoveRate, rebalanceEventCount, rebalanceIntervalInUse_, newInterval);
-              updateRebalanceInterval(i, newInterval);
+              updateRebalanceInterval(i, newInterval, "MD");
               cache_->clearRebalancerPoolEventMap(pid);
             }
             //v1: MI
-            if (effectiveMoveRate < 0.5 && rebalanceEventCount > 4) {
+            if (effectiveMoveRate < 0.5 && rebalanceEventCount >= 5) {
               XLOGF(INFO, "Effective movement rate is low ({}, {}), increasing "
                         "the rebalance interval, from {} : {}", effectiveMoveRate, rebalanceEventCount, rebalanceIntervalInUse_, rebalanceIntervalInUse_ * increaseIntervalFactor_);
               auto newInterval = rebalanceIntervalInUse_ * increaseIntervalFactor_;
-              updateRebalanceInterval(i, newInterval);
+              updateRebalanceInterval(i, newInterval, "MI");
               cache_->clearRebalancerPoolEventMap(pid);
             }
           }
@@ -807,10 +808,11 @@ double coefficientOfVariation(const std::map<ClassId, double>& values) {
 }
 
 
-void updateRebalanceInterval(uint64_t requestId, uint64_t newInterval) {
+void updateRebalanceInterval(uint64_t requestId, uint64_t newInterval, std::string reason = "") {
     XLOGF(INFO, "Rebalance interval updated from {} to {} at request id {}", rebalanceIntervalInUse_, newInterval, requestId);
     rebalanceIntervalInUse_ = newInterval; 
     cache_->addRebalanceInterval(requestId, rebalanceIntervalInUse_);
+    cache_->addIntervalChangeEvents(requestId, reason);
     if(rebalanceIntervalInUse_ < minRebalanceInterval_) {
       minRebalanceInterval_ = rebalanceIntervalInUse_;
     }

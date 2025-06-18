@@ -287,11 +287,11 @@ ClassId RebalanceStrategy::pickReceiverWithAllocFailures(
                            });
 }
 
-void RebalanceStrategy::recordRebalanceEvent(PoolId pid, RebalanceContext ctx) {
+void RebalanceStrategy::recordRebalanceEvent(PoolId pid, RebalanceContext ctx, size_t maxQueueSize) {
   if(ctx.isEffective()) {
     auto& eventQueue = recentRebalanceEvents_[pid];
     eventQueue.emplace_back(ctx);
-    if (eventQueue.size() > kMaxQueueSize) {
+    if (eventQueue.size() > maxQueueSize) {
       eventQueue.pop_front();
     }
   }

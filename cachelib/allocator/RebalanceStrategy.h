@@ -113,7 +113,7 @@ class RebalanceStrategy {
 
   virtual void uponAllocFailure() {}
 
-  void recordRebalanceEvent(PoolId pid, RebalanceContext ctx);
+  void recordRebalanceEvent(PoolId pid, RebalanceContext ctx, size_t maxQueueSize); 
 
   double getMinDiffValueFromRebalanceEvents(PoolId pid) const;
 

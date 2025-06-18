@@ -44,7 +44,8 @@ class RandomStrategy : public RebalanceStrategy {
         filterByNumEvictableSlabs(stats, stats.getClassIds(), config_.minSlabs);
     const auto victim = pickRandom(victimIds);
     auto receiverIds = stats.getClassIds();
-    receiverIds.erase(victim);
+    // this is for testing the cost of rebalance if there is only 1 class
+    //receiverIds.erase(victim);
     const auto receiver = pickRandom(receiverIds);
     return RebalanceContext{victim, receiver};
   }

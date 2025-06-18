@@ -95,7 +95,9 @@ struct Stats {
   std::vector<unsigned int> anomalyReqIds;
   std::vector<double> effectiveMovementRates;
   std::unordered_map<uint64_t, uint64_t> rebalanceIntervals;
+  std::unordered_map<uint64_t, std::string> intervalChangeEvents;
   std::unordered_map<uint64_t, std::tuple<double, uint64_t, uint64_t>> missRatios;
+  std::unordered_map<uint64_t, double> mhCVs;
 
   util::PercentileStats::Estimates cacheAllocateLatencyNs;
   util::PercentileStats::Estimates cacheFindLatencyNs;
@@ -214,6 +216,12 @@ struct Stats {
 
     folly::dynamic rebalanceIntervalsJson = mapToDynamicObject(rebalanceIntervals);
     json["rebalanceIntervals"] = rebalanceIntervalsJson;
+
+    folly::dynamic mhCVsJson = mapToDynamicObject(mhCVs);
+    json["mhCVs"] = mhCVsJson;
+
+    folly::dynamic intervalChangeEventsJson = mapToDynamicObject(intervalChangeEvents);
+    json["intervalChangeEvents"] = intervalChangeEventsJson;
 
     folly::dynamic deltaStatsJson = mapToDynamicObject(deltaStats);
     json["deltaStats"] = deltaStatsJson;

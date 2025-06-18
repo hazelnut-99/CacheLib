@@ -354,6 +354,10 @@ class Cache {
     return cache_->getPool(pid).allSlabsAllocated();
   }
 
+  unsigned int getNumClassId(PoolId pid) const {
+    return cache_->getPool(pid).getNumClassId();
+  }
+
   void incrAnomalyCount() {
     anomalyCount_ += 1;
   }
@@ -374,8 +378,16 @@ class Cache {
     rebalanceIntervals_[requestId] = rebalanceInterval;
   }
 
+  void addIntervalChangeEvents(uint64_t requestId, std::string event) {
+    intervalChangeEvents_[requestId] = event;
+  }
+
   void recordMissRatios(uint64_t requestId, double missRatio, uint64_t missDelta, uint64_t reqDelta) {
     missRatios_[requestId] = std::make_tuple(missRatio, missDelta, reqDelta);
+  }
+
+  void recordMhCV(uint64_t requestId, double mhCV) {
+    mhCVs_[requestId] = mhCV;
   }
 
   void recordDeltaStats(uint64_t requestId, std::string statsStr) {
@@ -547,7 +559,11 @@ class Cache {
 
   std::unordered_map<uint64_t, uint64_t> rebalanceIntervals_;
 
+  std::unordered_map<uint64_t, std::string> intervalChangeEvents_;
+
   std::unordered_map<uint64_t, std::tuple<double, uint64_t, uint64_t>> missRatios_;
+
+  std::unordered_map<uint64_t, double> mhCVs_;
 
   std::unordered_map<uint64_t, std::string> deltaStats_;
 
@@ -1280,7 +1296,9 @@ Stats Cache<Allocator>::getStats() const {
   ret.anomalyReqIds = anomalyReqIds_;
   ret.effectiveMovementRates = effectiveMovementRates_;
   ret.rebalanceIntervals = rebalanceIntervals_;
+  ret.intervalChangeEvents = intervalChangeEvents_; 
   ret.missRatios = missRatios_;
+  ret.mhCVs = mhCVs_;
   ret.deltaStats = deltaStats_;
 
   ret.poolUsageFraction.push_back(usageFraction);

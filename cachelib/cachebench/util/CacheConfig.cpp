@@ -242,7 +242,7 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     return std::make_shared<LAMAStrategy>(lamaConfig);
   } else {
     // use random strategy (custom impl)
-    return std::make_shared<RandomStrategyNew>(RandomStrategyNew::Config{
+    return std::make_shared<RandomStrategy>(RandomStrategy::Config{
         static_cast<unsigned int>(rebalanceMinSlabs)});
   }
 }
