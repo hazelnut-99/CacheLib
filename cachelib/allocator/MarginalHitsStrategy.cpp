@@ -140,6 +140,14 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
             scores.at(ctx.victimClassId),
             minDiffInUse_, config.minDiffRatio);
       ctx = kNoOpContext;
+    } else {
+      folly::dynamic logData = folly::dynamic::object
+        ("receiver_class_id", static_cast<int>(ctx.receiverClassId))
+        ("victim_class_id", static_cast<int>(ctx.victimClassId))
+        ("receiver_score", scores.at(ctx.receiverClassId))
+        ("victim_score", scores.at(ctx.victimClassId));
+        std::string jsonString = folly::toJson(logData);
+        XLOGF(DBG, "MH_details: {}", jsonString);
     }
   }
 
@@ -299,14 +307,14 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverFromRankings(
 }
 
 void MarginalHitsStrategy::increaseRebalanceThreshold(double suggestedValue) {
-  auto newValue = std::max(minDiffInUse_, std::ceil(suggestedValue) + 1);
+  auto newValue = std::max(minDiffInUse_, std::ceil(suggestedValue) + 5);
   XLOGF(INFO, "increase rebalance threshold: before: {}, after: {}",
         minDiffInUse_, newValue);
   minDiffInUse_ = newValue;
 }
 
 void MarginalHitsStrategy::decreaseRebalanceThreshold() {
-  auto newValue = std::max(minDiffInUse_ - 1, 1.0);
+  auto newValue = std::max(minDiffInUse_ - 5, 1.0);
   if (newValue == minDiffInUse_) {
     return;
   }

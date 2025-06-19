@@ -88,8 +88,8 @@ class MarginalHitsStrategy : public RebalanceStrategy {
   void uponAllocFailure() override {
     auto config = getConfigCopy();
     if (config.autoDecThreshold) {
-      XLOGF(INFO, "Alloc failure, resetting threshold for marginal-hits to 0");
-      minDiffInUse_ = 0;
+      // XLOGF(INFO, "Alloc failure, resetting threshold for marginal-hits to 0");
+      // minDiffInUse_ = 0;
     }
   }
 
