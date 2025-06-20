@@ -58,6 +58,8 @@ class MarginalHitsStrategy : public RebalanceStrategy {
 
     bool autoDecThreshold{false};
 
+    bool useProjectedScoreForVictim{false};
+
     unsigned int thrashingCheckWindowSize{5};
 
     bool enableOnlineLearning{false};
@@ -120,7 +122,7 @@ class MarginalHitsStrategy : public RebalanceStrategy {
   }
 
   // Doubles the rebalance threshold (minDiff). If minDiff is 0, set it to 1.
-  void increaseRebalanceThreshold(double suggestedValue);
+  void increaseRebalanceThreshold();
 
   void decreaseRebalanceThreshold();
 
@@ -152,6 +154,9 @@ class MarginalHitsStrategy : public RebalanceStrategy {
   // compute delta of tail hits for every class in this pool
   std::unordered_map<ClassId, double> computeClassMarginalHits(
       PoolId pid, const PoolStats& poolStats, unsigned int tailSlabCnt);
+  
+  std::unordered_map<ClassId, double> computeClassSecondLastTailHits(
+      PoolId pid, const PoolStats& poolStats);
 
   void initializeModelForPool(PoolId poolId);
 

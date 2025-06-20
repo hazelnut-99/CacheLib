@@ -54,6 +54,7 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
   XLOGF(DBG, "rebalance_threshold: {}", minDiffInUse_);
 
   auto scores = computeClassMarginalHits(pid, poolStats, config.tailSlabCnt);
+  auto projectedScores = computeClassSecondLastTailHits(pid, poolStats);
   auto classesSet = poolStats.getClassIds();
   std::vector<ClassId> classes(classesSet.begin(), classesSet.end());
   std::unordered_map<ClassId, bool> validVictim;
@@ -123,16 +124,20 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
   }
   std::string jsonString = folly::toJson(logArray);
   XLOGF(DBG, "Rebalance_class_snapshot: {}", jsonString);
+  auto receiverScore = scores.at(ctx.receiverClassId);
+  auto victimScore = config.useProjectedScoreForVictim ? projectedScores.at(ctx.victimClassId)
+                                                        : scores.at(ctx.victimClassId);
+    
+  auto improvement = receiverScore - victimScore;
+  auto improvementRatio = improvement / (victimScore == 0 ? 1 : victimScore);
 
   if (!ctx.isEffective()) {
     ctx = kNoOpContext;
   } else {
-    auto improvement =
-        scores.at(ctx.receiverClassId) - scores.at(ctx.victimClassId);
-    
+
     if ((minDiffInUse_ > 0 && improvement < minDiffInUse_) || 
           (config.minDiffRatio > 0 
-            && improvement < config.minDiffRatio * scores.at(ctx.victimClassId))) {
+            && improvement < config.minDiffRatio * victimScore)) {
       XLOGF(DBG,
             "Not enough to trigger rebalancing, receiver score: {}, victim "
             "score: {}, threshold1: {}, threshold2: {}",
@@ -148,6 +153,17 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
         ("victim_score", scores.at(ctx.victimClassId));
         std::string jsonString = folly::toJson(logData);
         XLOGF(DBG, "MH_details: {}", jsonString);
+
+      XLOGF(INFO,
+            "MH decision: receiver class {}, receiver score {}, "
+            "victim class {}, victim score {}, victim projected score {}, improvement {}, ratio {}",
+            static_cast<int>(ctx.receiverClassId),
+            scores.at(ctx.receiverClassId),
+            static_cast<int>(ctx.victimClassId),
+            scores.at(ctx.victimClassId), 
+            projectedScores.at(ctx.victimClassId),
+            improvement,
+            improvementRatio);
     }
   }
 
@@ -170,8 +186,7 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
   }
 
   if (ctx.isEffective()) {
-    ctx.diffValue =
-        scores.at(ctx.receiverClassId) - scores.at(ctx.victimClassId);
+    ctx.diffValue = improvement;
     ctx.deltaDiffValue = lastDiffs_[pid] - ctx.diffValue;
     lastDiffs_[pid] = ctx.diffValue;
     ctx.normalizedRange = computeNormalizedMarginalHitsRange(scores);
@@ -200,7 +215,7 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
       if (emr < 0.5 && config.autoIncThreshold) {
         XLOGF(INFO, "min diff value in the queue: {}",
               getMinDiffValueFromRebalanceEvents(pid));
-        increaseRebalanceThreshold(getMinDiffValueFromRebalanceEvents(pid));
+        increaseRebalanceThreshold();
         clearPoolRebalanceEvent(pid);
       } else if (emr >= 0.95 && config.autoDecThreshold && eventQueueSize >= poolStats.getClassIds().size()) {
         decreaseRebalanceThreshold();
@@ -265,6 +280,20 @@ MarginalHitsStrategy::computeClassMarginalHits(PoolId pid,
   return scores;
 }
 
+std::unordered_map<ClassId, double>
+MarginalHitsStrategy::computeClassSecondLastTailHits(PoolId pid,
+                                               const PoolStats& poolStats) {
+  const auto& poolState = getPoolState(pid);
+  const auto config = getConfigCopy();
+  std::unordered_map<ClassId, double> scores;
+  for (auto info : poolState) {
+    if (info.id != Slab::kInvalidClassId) {
+      scores[info.id] = info.getSecondLastTailHits(poolStats);
+    }
+  }
+  return scores;
+}
+
 double MarginalHitsStrategy::computeNormalizedMarginalHitsRange(
     const std::unordered_map<ClassId, double>& scores, double epsilon) const {
   if (scores.empty()) {
@@ -306,16 +335,16 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverFromRankings(
   return ctx;
 }
 
-void MarginalHitsStrategy::increaseRebalanceThreshold(double suggestedValue) {
-  auto newValue = std::max(minDiffInUse_, std::ceil(suggestedValue) + 5);
+void MarginalHitsStrategy::increaseRebalanceThreshold() {
+  auto newValue = minDiffInUse_ + 5;
   XLOGF(INFO, "increase rebalance threshold: before: {}, after: {}",
         minDiffInUse_, newValue);
   minDiffInUse_ = newValue;
 }
 
 void MarginalHitsStrategy::decreaseRebalanceThreshold() {
-  auto newValue = std::max(minDiffInUse_ - 5, 1.0);
-  if (newValue == minDiffInUse_) {
+  auto newValue = std::max(minDiffInUse_ - 5, 10.0);
+  if (newValue >= minDiffInUse_) {
     return;
   }
   XLOGF(INFO, "decrease rebalance threshold: before: {}, after: {}",

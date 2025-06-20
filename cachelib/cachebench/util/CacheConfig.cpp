@@ -77,6 +77,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, mhDecayWithHits);
   JSONSetVal(configJson, mhAutoDecThreshold);
   JSONSetVal(configJson, mhAutoIncThreshold);
+  JSONSetVal(configJson, mhUseProjectedScoreForVictim);
   JSONSetVal(configJson, mhMinModelSampleSize);
   JSONSetVal(configJson, mhBufferSize);
   JSONSetVal(configJson, lamaMinThreshold);
@@ -224,6 +225,7 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     mhConfig.filterReceiverByEvictionRate = mhFilterReceiverByEvictionRate;
     mhConfig.autoIncThreshold = mhAutoIncThreshold;
     mhConfig.autoDecThreshold = mhAutoDecThreshold;
+    mhConfig.useProjectedScoreForVictim = mhUseProjectedScoreForVictim;
     mhConfig.minModelSampleSize = mhMinModelSampleSize;
     mhConfig.bufferSize = mhBufferSize;
     return std::make_shared<MarginalHitsStrategy>(mhConfig);

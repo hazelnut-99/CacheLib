@@ -40,6 +40,7 @@ class CacheMonitorFactory {
   virtual std::unique_ptr<CacheMonitor> create(LruAllocator& cache) = 0;
   virtual std::unique_ptr<CacheMonitor> create(Lru2QAllocator& cache) = 0;
   virtual std::unique_ptr<CacheMonitor> create(TinyLFUAllocator& cache) = 0;
+  virtual std::unique_ptr<CacheMonitor> create(Simple3QAllocator& cache) = 0;
 };
 
 // Parse memory tiers configuration from JSON config
@@ -133,6 +134,7 @@ struct CacheConfig : public JSONConfig {
 
   bool mhAutoDecThreshold{false};
   bool mhAutoIncThreshold{false};
+  bool mhUseProjectedScoreForVictim{false};
 
   uint64_t htBucketPower{22}; // buckets in hash table
   uint64_t htLockPower{20};   // locks in hash table

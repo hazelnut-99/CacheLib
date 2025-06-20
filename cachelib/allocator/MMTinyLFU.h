@@ -1017,6 +1017,7 @@ MMContainerStat MMTinyLFU::Container<T, HookPtr>::getStats() const noexcept {
           0,
           0,
           0,
+          0,
           0};
 }
 

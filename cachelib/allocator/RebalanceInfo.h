@@ -57,6 +57,8 @@ struct Info {
 
   uint64_t accuHotHits{0};
 
+  uint64_t accuSecondLastTailHits{0};
+
   // TODO(sugak) this is changed to unblock the LLVM upgrade The fix is not
   // completely understood, but it's a safe change T16521551 - Info() noexcept
   // = default;
@@ -68,8 +70,9 @@ struct Info {
        uint64_t th,
        uint64_t ch,
        uint64_t wh,
-       uint64_t hh) noexcept
-      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh) {}
+       uint64_t hh,
+       uint64_t slth) noexcept
+      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh), accuSecondLastTailHits(slth) {}
 
   // number of rounds we hold off for when we acquire a slab.
   static constexpr unsigned int kNumHoldOffRounds = 10;
@@ -161,6 +164,11 @@ struct Info {
     return marginalHits / (trueTailSize > 0 ? trueTailSize : 1);
   }
 
+  uint64_t getSecondLastTailHits(const PoolStats& poolStats) const {
+    return poolStats.cacheStats.at(id).containerStat.numSecondLastTailAccesses -
+           accuSecondLastTailHits;
+  }
+
   uint64_t getColdHits(const PoolStats& poolStats) const {
     return poolStats.cacheStats.at(id).containerStat.numColdAccesses -
            accuColdHits;
@@ -217,6 +225,7 @@ struct Info {
   void updateTailHits(const PoolStats& poolStats) noexcept {
     const auto& cacheStats = poolStats.cacheStats.at(id);
     accuTailHits = cacheStats.containerStat.numTailAccesses;
+    accuSecondLastTailHits = cacheStats.containerStat.numSecondLastTailAccesses;
   }
 
   // updates the current record to store the current state of slabs and the

@@ -612,6 +612,22 @@ inline typename TinyLFUAllocator::MMConfig makeMMConfig(
       config.lruRefreshSec, config.lruUpdateOnWrite, config.lruUpdateOnRead);
 }
 
+// 3q with two tails
+template <>
+inline typename Simple3QAllocator::MMConfig makeMMConfig(
+    CacheConfig const& config) {
+  return Simple3QAllocator::MMConfig(0, //refresh sec, quick promotion
+                                  config.lruRefreshRatio,
+                                  config.lruUpdateOnWrite,
+                                  config.lruUpdateOnRead,
+                                  config.tryLockUpdate,
+                                  true, // timely rebalance, may hurt throughput, but for accurate tail hits tracking
+                                  config.lru2qHotPct,
+                                  config.lru2qColdPct,
+                                  0,
+                                  config.useCombinedLockForIterators);
+};
+
 template <typename Allocator>
 uint64_t Cache<Allocator>::fetchNandWrites() const {
   size_t total = 0;

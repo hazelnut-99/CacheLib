@@ -95,6 +95,7 @@ struct MMContainerStat {
   uint64_t numColdAccesses;
   uint64_t numWarmAccesses;
   uint64_t numTailAccesses;
+  uint64_t numSecondLastTailAccesses;
 };
 
 // cache related stats for a given allocation class.

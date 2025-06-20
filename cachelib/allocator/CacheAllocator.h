@@ -6111,4 +6111,7 @@ using Lru2QAllocator = CacheAllocator<Lru2QCacheTrait>;
 // inserted items. And eventually it will onl admit items that are accessed
 // beyond a threshold into the warm cache.
 using TinyLFUAllocator = CacheAllocator<TinyLFUCacheTrait>;
+
+using Simple3QAllocator =
+    CacheAllocator<Simple3QCacheTrait>; // Simple 3Q eviction policy  
 } // namespace facebook::cachelib
