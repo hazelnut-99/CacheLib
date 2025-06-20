@@ -154,7 +154,7 @@ RebalanceContext MarginalHitsStrategy::pickVictimAndReceiverImpl(
         std::string jsonString = folly::toJson(logData);
         XLOGF(DBG, "MH_details: {}", jsonString);
 
-      XLOGF(INFO,
+      XLOGF(DBG,
             "MH decision: receiver class {}, receiver score {}, "
             "victim class {}, victim score {}, victim projected score {}, improvement {}, ratio {}",
             static_cast<int>(ctx.receiverClassId),
