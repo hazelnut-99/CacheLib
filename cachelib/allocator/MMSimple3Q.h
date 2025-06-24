@@ -39,19 +39,15 @@ namespace facebook::cachelib {
 template <typename MMType>
 class MMTypeTest;
 
-// The basic version of this cache has 3 queues (Hot, Warm, and Cold). When an
-// item is added, it goes to Hot queue; we have percentage sizes for Hot and
-// Warm, and when they are too large, in rebalance() items can be moved to
-// Cold. Promotion moves items to the head of its queue except for Cold it
-// moves to the head of Warm queue. The eviction order is Cold, Hot, and Warm.
-//
-// When config.tailSize > 0, we enable two extra queues (ColdTail, WarmTail) of
-// memory size 1 slab to provide access stats for the tail lru slab. In this
-// case, in rebalance() we move items in WarmTail to Cold before moving from
-// Warm to Cold if the total size of Warm and WarmTail is larger than expected.
-// Also, tail queues are adjusted in rebalance() so that their sizes are
-// config.tailSize. The eviction order is ColdTail, Cold, Hot, WarmTail, and
-// Warm.
+/**
+ * 
+ * we copied the original 2Q implementation, reuse its configs.
+ * we chain three queues: hot -> hot_tail -> cold
+ * 
+ * cold represents the last slab of items
+ * hot_tail represents the 2nd last slab of items
+ * 
+ */
 class MMSimple3Q {
  public:
   // unique identifier per MMType
@@ -734,6 +730,9 @@ bool MMSimple3Q::Container<T, HookPtr>::recordAccess(T& node,
           lru_.getList(LruType::HotTail).remove(node);
           lru_.getList(LruType::Hot).linkAtHead(node);
           ++numHotTailAccesses_;
+          if (config_.rebalanceOnRecordAccess) {
+            rebalance();
+          }
         } else {
           lru_.getList(LruType::Hot).moveToHead(node);
         }
@@ -750,12 +749,13 @@ bool MMSimple3Q::Container<T, HookPtr>::recordAccess(T& node,
         unmarkCold(node);
         markHot(node);
         ++numColdAccesses_;
+        if (config_.rebalanceOnRecordAccess) {
+            rebalance();
+        }
       } 
       // only rebalance if config says so. recordAccess is called mostly on
       // latency sensitive cache get operations.
-      if (config_.rebalanceOnRecordAccess) {
-        rebalance();
-      }
+
       setUpdateTime(node, curr);
       return true;
     };
