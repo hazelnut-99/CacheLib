@@ -105,6 +105,7 @@ class CacheStressor : public Stressor {
     useAdaptiveRebalanceInterval_ = cacheConfig.useAdaptiveRebalanceInterval;
     useAdaptiveRebalanceIntervalV2_ =
         cacheConfig.useAdaptiveRebalanceIntervalV2;
+    syncRebalance_ = cacheConfig.syncRebalance;
     increaseIntervalFactor_ = cacheConfig.increaseIntervalFactor;
     rebalancerDisabled_ = (cacheConfig.rebalanceStrategy == "disabled");
     useAnomalyDetection_ = cacheConfig.useAnomalyDetection;
@@ -477,7 +478,7 @@ class CacheStressor : public Stressor {
       
 
         if((i - lastRebalanceTime_) >= rebalanceIntervalInUse_ && !rebalancerDisabled_) {
-          cache_->wakeupPoolRebalancer(i);
+          cache_->wakeupPoolRebalancer(syncRebalance_, i);
           lastRebalanceTime_ = i;
           cache_->addRebalanceRequestId(i);
           double emr = cache_->getEffectiveMovementRate(pid);
@@ -875,6 +876,8 @@ void updateRebalanceInterval(uint64_t requestId, uint64_t newInterval, std::stri
   bool useAdaptiveRebalanceInterval_;
 
   bool useAdaptiveRebalanceIntervalV2_;
+
+  bool syncRebalance_;
 
   unsigned int increaseIntervalFactor_;
 

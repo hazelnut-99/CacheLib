@@ -81,6 +81,7 @@ struct CacheConfig : public JSONConfig {
   uint64_t wakeUpRebalancerEveryXReqs{0};
   uint64_t anomalyDetectionFrequency{100000};
   unsigned int increaseIntervalFactor{2};
+  bool syncRebalance{true};
   bool useAdaptiveRebalanceInterval{false};
   bool useAdaptiveRebalanceIntervalV2{false};
   bool useAnomalyDetection{false};

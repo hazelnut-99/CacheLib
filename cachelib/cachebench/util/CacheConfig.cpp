@@ -39,6 +39,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, anomalyDetectionFrequency);
   JSONSetVal(configJson, useAdaptiveRebalanceInterval);
   JSONSetVal(configJson, useAdaptiveRebalanceIntervalV2);
+  JSONSetVal(configJson, syncRebalance);
   JSONSetVal(configJson, useAnomalyDetection);
   JSONSetVal(configJson, increaseIntervalFactor);
   JSONSetVal(configJson, moveOnSlabRelease);

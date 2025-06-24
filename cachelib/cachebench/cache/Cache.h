@@ -329,9 +329,9 @@ class Cache {
   // return the stats for the pool.
   PoolStats getPoolStats(PoolId pid) const { return cache_->getPoolStats(pid); }
 
-  void wakeupPoolRebalancer(uint64_t request_id) {
+  void wakeupPoolRebalancer(bool synchronousOp, uint64_t request_id) {
     // synchronously
-    cache_->wakeupPoolRebalancer(true, request_id);
+    cache_->wakeupPoolRebalancer(synchronousOp, request_id);
   }
 
   void clearRebalancerPoolEventMap(PoolId pid) {
