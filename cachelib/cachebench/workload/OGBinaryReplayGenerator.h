@@ -91,7 +91,7 @@ class OGBinaryReplayGenerator : public ReplayGeneratorBase {
   explicit OGBinaryReplayGenerator(const StressorConfig& config)
       : ReplayGeneratorBase(config), traceStream_(config, 0, columnTable_), zstdReader_() {
     if(config.zstdTrace){
-      zstdReader_.open(config.traceFileName);
+      zstdReader_.open(config.traceFileName, config.compressed);
       XLOGF(INFO, "Reading zstd trace file");
     }
     for (uint32_t i = 0; i < numShards_; ++i) {
