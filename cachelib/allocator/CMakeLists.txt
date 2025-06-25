@@ -40,6 +40,8 @@ add_library (cachelib_allocator
     LruTailAgeStrategy.cpp
     MarginalHitsOptimizeStrategy.cpp
     MarginalHitsStrategy.cpp
+    MarginalHitsStrategyNew.cpp
+    MarginalHitsStrategyOld.cpp
     HitsPerTailSlabStrategy.cpp
     LAMAStrategy.cpp
     memory/AllocationClass.cpp

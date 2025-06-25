@@ -621,7 +621,24 @@ inline typename Simple3QAllocator::MMConfig makeMMConfig(
                                   config.lruUpdateOnWrite,
                                   config.lruUpdateOnRead,
                                   config.tryLockUpdate,
-                                  true, // timely rebalance, may hurt throughput, but for accurate tail hits tracking
+                                  config.rebalanceOnRecordAccess, // timely rebalance, may hurt throughput, but for accurate tail hits tracking
+                                  config.lru2qHotPct,
+                                  config.lru2qColdPct,
+                                  0,
+                                  config.useCombinedLockForIterators);
+};
+
+
+// 2q with one tail
+template <>
+inline typename Simple2QAllocator::MMConfig makeMMConfig(
+    CacheConfig const& config) {
+  return Simple2QAllocator::MMConfig(0, //refresh sec, quick promotion
+                                  config.lruRefreshRatio,
+                                  config.lruUpdateOnWrite,
+                                  config.lruUpdateOnRead,
+                                  config.tryLockUpdate,
+                                  config.rebalanceOnRecordAccess, // timely rebalance, may hurt throughput, but for accurate tail hits tracking
                                   config.lru2qHotPct,
                                   config.lru2qColdPct,
                                   0,

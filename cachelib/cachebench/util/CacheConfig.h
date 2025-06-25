@@ -41,6 +41,7 @@ class CacheMonitorFactory {
   virtual std::unique_ptr<CacheMonitor> create(Lru2QAllocator& cache) = 0;
   virtual std::unique_ptr<CacheMonitor> create(TinyLFUAllocator& cache) = 0;
   virtual std::unique_ptr<CacheMonitor> create(Simple3QAllocator& cache) = 0;
+  virtual std::unique_ptr<CacheMonitor> create(Simple2QAllocator& cache) = 0;
 };
 
 // Parse memory tiers configuration from JSON config
@@ -154,6 +155,7 @@ struct CacheConfig : public JSONConfig {
   bool lruUpdateOnRead{true};
   bool tryLockUpdate{false};
   bool useCombinedLockForIterators{false};
+  bool rebalanceOnRecordAccess{true};
 
   // LRU param
   uint64_t lruIpSpec{0};

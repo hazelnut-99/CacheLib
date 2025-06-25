@@ -213,6 +213,9 @@ std::unique_ptr<Stressor> Stressor::makeStressor(
     } else if (cacheConfig.allocator == "SIMPLE3Q") {
       return std::make_unique<CacheStressor<Simple3QAllocator>>(
           cacheConfig, stressorConfig, std::move(generator));
+    } else if (cacheConfig.allocator == "SIMPLE2Q") {
+      return std::make_unique<CacheStressor<Simple2QAllocator>>(
+          cacheConfig, stressorConfig, std::move(generator));
     }
   }
   throw std::invalid_argument("Invalid config");

@@ -20,6 +20,8 @@
 #include "cachelib/allocator/HitsPerSlabStrategy.h"
 #include "cachelib/allocator/HitsPerTailSlabStrategy.h"
 #include "cachelib/allocator/LAMAStrategy.h"
+#include "cachelib/allocator/MarginalHitsStrategyNew.h"
+#include "cachelib/allocator/MarginalHitsStrategyOld.h"
 #include "cachelib/allocator/LruTailAgeStrategy.h"
 #include "cachelib/allocator/MarginalHitsStrategy.h"
 #include "cachelib/allocator/RandomStrategy.h"
@@ -89,6 +91,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
 
   JSONSetVal(configJson, lruRefreshSec);
   JSONSetVal(configJson, lruRefreshRatio);
+  JSONSetVal(configJson, rebalanceOnRecordAccess);
   JSONSetVal(configJson, mmReconfigureIntervalSecs);
   JSONSetVal(configJson, lruUpdateOnWrite);
   JSONSetVal(configJson, lruUpdateOnRead);
@@ -243,6 +246,20 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     LAMAStrategy::Config lamaConfig;
     lamaConfig.missRatioImprovementThreshold = lamaMinThreshold;
     return std::make_shared<LAMAStrategy>(lamaConfig);
+  } else if (rebalanceStrategy == "marginal-hits-new") {
+    MarginalHitsStrategyNew::Config mhNewConfig;
+    mhNewConfig.minSlabs = rebalanceMinSlabs;
+    mhNewConfig.movingAverageParam = mhMovingAverageParam;
+    mhNewConfig.onlyUpdateHitIfRebalance = mhOnlyUpdateHitIfRebalance;
+    mhNewConfig.maxFreeMemSlabs = mhMaxFreeMemSlabs;
+    mhNewConfig.minDiff = mhMinDiff;
+    return std::make_shared<MarginalHitsStrategyNew>(mhNewConfig);
+  } else if (rebalanceStrategy == "marginal-hits-old") {
+    MarginalHitsStrategyOld::Config mhOldConfig;
+    mhOldConfig.minSlabs = rebalanceMinSlabs;
+    mhOldConfig.movingAverageParam = mhMovingAverageParam;
+    mhOldConfig.maxFreeMemSlabs = mhMaxFreeMemSlabs;
+    return std::make_shared<MarginalHitsStrategyOld>(mhOldConfig);
   } else {
     // use random strategy (custom impl)
     return std::make_shared<RandomStrategy>(RandomStrategy::Config{

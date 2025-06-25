@@ -77,6 +77,8 @@ class RebalanceStrategy {
     PickNothingOrTest,
     Random,
     MarginalHits,
+    MarginalHitsNew,
+    MarginalHitsOld,
     FreeMem,
     HitsPerSlab,
     HitsPerTailSlab,
