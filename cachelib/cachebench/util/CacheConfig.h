@@ -138,6 +138,13 @@ struct CacheConfig : public JSONConfig {
   bool mhAutoIncThreshold{false};
   bool mhUseProjectedScoreForVictim{false};
 
+  bool thresholdAI{false}; 
+  bool thresholdMI{false}; 
+  bool thresholdAD{false}; 
+  bool thresholdMD{false}; 
+  
+
+
   uint64_t htBucketPower{22}; // buckets in hash table
   uint64_t htLockPower{20};   // locks in hash table
 

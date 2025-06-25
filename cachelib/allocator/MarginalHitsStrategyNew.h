@@ -43,6 +43,11 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
 
     double minDiff{0.0};
 
+    bool thresholdAI{false};
+    bool thresholdMI{false};
+    bool thresholdAD{false};
+    bool thresholdMD{false};
+
     Config() noexcept {}
     explicit Config(double param) noexcept : Config(param, 1, 1) {}
     Config(double param, unsigned int minSlab, unsigned int maxFree) noexcept
@@ -56,6 +61,12 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
   void updateConfig(const BaseConfig& baseConfig) override final {
     std::lock_guard<std::mutex> l(configLock_);
     config_ = static_cast<const Config&>(baseConfig);
+  }
+
+  void updateMinDff(double newValue) {
+    std::lock_guard<std::mutex> l(configLock_);
+    XLOGF(INFO, "Updating minDiff from {} to {}", config_.minDiff, newValue);
+    config_.minDiff = newValue;
   }
 
   explicit MarginalHitsStrategyNew(Config config = {});

@@ -75,7 +75,7 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
               ctx.receiverClassId, ctx.victimClassId, receiverScore, victimScore, improvement, improvementRatio);
         ctx = kNoOpContext;
     } else {
-        XLOGF(DBG, "rebalancing, receiver id: {}, victim id: {}, receiver score: {}, victim score: {}, improvement: {}, improvement ratio: {}",
+        XLOGF(INFO, "rebalancing, receiver id: {}, victim id: {}, receiver score: {}, victim score: {}, improvement: {}, improvement ratio: {}",
               ctx.receiverClassId, ctx.victimClassId, receiverScore, victimScore, improvement, improvementRatio);
 
     }
@@ -89,6 +89,36 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
       for (const auto i : poolStats.getClassIds()) {
         poolState[i].updateTailHits(poolStats);
       }
+  }
+
+  // self-tuning threshold for the next round.
+  if(ctx.isEffective()){
+    // max window size: 2 * n_classes
+    recordRebalanceEvent(pid, ctx, classes.size() * 2);
+    auto effectiveMoveRate = queryEffectiveMoveRate(pid);
+    auto windowSize = getRebalanceEventQueueSize(pid);
+    XLOGF(INFO, 
+          "Rebalancing: effective move rate = {}, window size = {}",
+          effectiveMoveRate,
+          windowSize);
+    if(effectiveMoveRate <= 0.5 && windowSize >= classes.size()) {
+        if(config.thresholdAI) {
+          updateMinDff(config.minDiff + 5);
+          clearPoolRebalanceEvent(pid);
+        } else if (config.thresholdMI){
+          updateMinDff(config.minDiff * 2);
+          clearPoolRebalanceEvent(pid);
+        }
+        
+    } else if (effectiveMoveRate >= 0.95 && windowSize >= classes.size()) {
+        if(config.thresholdAD) {
+          updateMinDff(std::max(5.0, config.minDiff - 5));
+          clearPoolRebalanceEvent(pid);
+        } else if (config.thresholdMD){
+          updateMinDff(std::max(5.0, config.minDiff / 2));
+          clearPoolRebalanceEvent(pid);
+        }
+    }
   }
   
   return ctx;
@@ -107,6 +137,7 @@ MarginalHitsStrategyNew::computeClassMarginalHits(PoolId pid,
   std::unordered_map<ClassId, double> scores;
   for (auto info : poolState) {
     if (info.id != Slab::kInvalidClassId) {
+      // this score is the latest delta.
       scores[info.id] = info.getMarginalHits(poolStats, 1);
     }
   }
