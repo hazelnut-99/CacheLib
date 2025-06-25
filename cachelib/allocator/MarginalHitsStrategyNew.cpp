@@ -41,7 +41,7 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
           static_cast<int>(pid));
     return kNoOpContext;
   }
-  auto scores = computeClassMarginalHits(pid, poolStats);
+  auto scores = computeClassMarginalHits(pid, poolStats, config.movingAverageParam);
   auto classesSet = poolStats.getClassIds();
   std::vector<ClassId> classes(classesSet.begin(), classesSet.end());
   std::unordered_map<ClassId, bool> validVictim;
@@ -62,7 +62,8 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
       classStates_[pid].smoothedRanks[cid] = 0;
     }
   }
-  classStates_[pid].updateRankings(scores, config.movingAverageParam);
+  // we don't rely on this decay anymore
+  classStates_[pid].updateRankings(scores, 0.0);
   RebalanceContext ctx = pickVictimAndReceiverFromRankings(pid, validVictim, validReceiver);
   if(!force && ctx.isEffective()) {
     //extra filterings
@@ -70,12 +71,13 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
     auto victimScore = scores.at(ctx.victimClassId);
     auto improvement = receiverScore - victimScore;
     auto improvementRatio = improvement / (victimScore == 0 ? 1 : victimScore);
-    if (config.minDiff > 0 && improvement < config.minDiff){
-        XLOGF(DBG, "Not enough to trigger rebalancing, receiver id: {}, victim id: {}, receiver score: {}, victim score: {}, improvement: {}, improvement ratio: {}",
-              ctx.receiverClassId, ctx.victimClassId, receiverScore, victimScore, improvement, improvementRatio);
+    if ((config.minDiff > 0 && improvement < config.minDiff) || 
+        (config.minDiffRatio > 0 && improvementRatio < config.minDiffRatio)){
+        XLOGF(DBG, "Not enough to trigger rebalancing, receiver id: {}, victim id: {}, receiver score: {}, victim score: {}, improvement: {}, improvement ratio: {}, thresh1: {}, thresh2: {}",
+              ctx.receiverClassId, ctx.victimClassId, receiverScore, victimScore, improvement, improvementRatio, config.minDiff, config.minDiffRatio);
         ctx = kNoOpContext;
     } else {
-        XLOGF(INFO, "rebalancing, receiver id: {}, victim id: {}, receiver score: {}, victim score: {}, improvement: {}, improvement ratio: {}",
+        XLOGF(DBG, "rebalancing, receiver id: {}, victim id: {}, receiver score: {}, victim score: {}, improvement: {}, improvement ratio: {}",
               ctx.receiverClassId, ctx.victimClassId, receiverScore, victimScore, improvement, improvementRatio);
 
     }
@@ -87,7 +89,7 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
   auto& poolState = getPoolState(pid);
   if(ctx.isEffective() || !config.onlyUpdateHitIfRebalance) {
       for (const auto i : poolStats.getClassIds()) {
-        poolState[i].updateTailHits(poolStats);
+        poolState[i].updateTailHits(poolStats, config.movingAverageParam);
       }
   }
 
@@ -97,7 +99,7 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
     recordRebalanceEvent(pid, ctx, classes.size() * 2);
     auto effectiveMoveRate = queryEffectiveMoveRate(pid);
     auto windowSize = getRebalanceEventQueueSize(pid);
-    XLOGF(INFO, 
+    XLOGF(DBG, 
           "Rebalancing: effective move rate = {}, window size = {}",
           effectiveMoveRate,
           windowSize);
@@ -112,10 +114,10 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
         
     } else if (effectiveMoveRate >= 0.95 && windowSize >= classes.size()) {
         if(config.thresholdAD) {
-          updateMinDff(std::max(5.0, config.minDiff - 5));
+          updateMinDff(std::max(2.0, config.minDiff - 5));
           clearPoolRebalanceEvent(pid);
         } else if (config.thresholdMD){
-          updateMinDff(std::max(5.0, config.minDiff / 2));
+          updateMinDff(std::max(2.0, config.minDiff / 2));
           clearPoolRebalanceEvent(pid);
         }
     }
@@ -132,13 +134,14 @@ ClassId MarginalHitsStrategyNew::pickVictimImpl(const CacheBase& cache,
 
 std::unordered_map<ClassId, double>
 MarginalHitsStrategyNew::computeClassMarginalHits(PoolId pid,
-                                               const PoolStats& poolStats) {
+                                               const PoolStats& poolStats,
+                                               double decayFactor) {
   const auto& poolState = getPoolState(pid);
   std::unordered_map<ClassId, double> scores;
   for (auto info : poolState) {
     if (info.id != Slab::kInvalidClassId) {
       // this score is the latest delta.
-      scores[info.id] = info.getMarginalHits(poolStats, 1);
+      scores[info.id] = info.getDecayedMarginalHits(poolStats, 1, decayFactor);
     }
   }
   return scores;

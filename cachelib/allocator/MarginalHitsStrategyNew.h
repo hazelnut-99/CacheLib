@@ -41,7 +41,8 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
 
     bool onlyUpdateHitIfRebalance{false};
 
-    double minDiff{0.0};
+    double minDiff{2.0};
+    double minDiffRatio{0.1};
 
     bool thresholdAI{false};
     bool thresholdMI{false};
@@ -64,6 +65,9 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
   }
 
   void updateMinDff(double newValue) {
+    if(config_.minDiff == newValue){
+      return;
+    }
     std::lock_guard<std::mutex> l(configLock_);
     XLOGF(INFO, "Updating minDiff from {} to {}", config_.minDiff, newValue);
     config_.minDiff = newValue;
@@ -94,7 +98,7 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
  private:
   // compute delta of tail hits for every class in this pool
   std::unordered_map<ClassId, double> computeClassMarginalHits(
-      PoolId pid, const PoolStats& poolStats);
+      PoolId pid, const PoolStats& poolStats, double decayFactor);
 
   // pick victim and receiver according to smoothed rankings
   RebalanceContext pickVictimAndReceiverFromRankings(

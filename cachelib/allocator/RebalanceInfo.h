@@ -59,6 +59,8 @@ struct Info {
 
   uint64_t accuSecondLastTailHits{0};
 
+  double decayedAccuTailHits{0.0};
+
   // TODO(sugak) this is changed to unblock the LLVM upgrade The fix is not
   // completely understood, but it's a safe change T16521551 - Info() noexcept
   // = default;
@@ -71,8 +73,9 @@ struct Info {
        uint64_t ch,
        uint64_t wh,
        uint64_t hh,
-       uint64_t slth) noexcept
-      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh), accuSecondLastTailHits(slth) {}
+       uint64_t slth,
+       double dath) noexcept
+      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh), accuSecondLastTailHits(slth),  decayedAccuTailHits{0.0}{}
 
   // number of rounds we hold off for when we acquire a slab.
   static constexpr unsigned int kNumHoldOffRounds = 10;
@@ -155,13 +158,18 @@ struct Info {
   //
   // @param poolStats  the current pool stats for this pool.
   // @return the marginal hits
-  uint64_t getMarginalHits(const PoolStats& poolStats, unsigned int tailSlabCnt) const {
+  double getMarginalHits(const PoolStats& poolStats, unsigned int tailSlabCnt) const {
     auto marginalHits =  poolStats.cacheStats.at(id).containerStat.numTailAccesses -
            accuTailHits;
     auto totalSlabs = poolStats.numSlabsForClass(id);
     auto trueTailSize = (tailSlabCnt > totalSlabs ? totalSlabs : tailSlabCnt);
     // marginal hits per slab (todo: future this may need changes)
     return marginalHits / (trueTailSize > 0 ? trueTailSize : 1);
+  }
+
+  double getDecayedMarginalHits(const PoolStats& poolStats, unsigned int tailSlabCnt, double decayFactor=0.0) const {
+    // decayed past + now
+    return decayedAccuTailHits + getMarginalHits(poolStats, tailSlabCnt) * (1 - decayFactor);
   }
 
   uint64_t getSecondLastTailHits(const PoolStats& poolStats) const {
@@ -222,8 +230,9 @@ struct Info {
     hits = poolStats.numHitsForClass(id);
   }
 
-  void updateTailHits(const PoolStats& poolStats) noexcept {
+  void updateTailHits(const PoolStats& poolStats, double decayFactor=0.0) noexcept {
     const auto& cacheStats = poolStats.cacheStats.at(id);
+    decayedAccuTailHits = (decayedAccuTailHits + getMarginalHits(poolStats, 1)) * decayFactor;
     accuTailHits = cacheStats.containerStat.numTailAccesses;
     accuSecondLastTailHits = cacheStats.containerStat.numSecondLastTailAccesses;
   }

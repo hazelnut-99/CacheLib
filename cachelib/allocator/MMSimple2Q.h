@@ -784,10 +784,10 @@ cachelib::EvictionAgeStat MMSimple2Q::Container<T, HookPtr>::getEvictionAgeStatL
 
   EvictionAgeStat stat{};
   
-  stat.warmQueueStat.oldestElementAge =
-      getOldestAgeLocked(LruType::HotTail, currTime);
-  stat.warmQueueStat.projectedAge =
-      getProjectedAge(LruType::HotTail, stat.coldQueueStat.oldestElementAge);
+  stat.warmQueueStat.oldestElementAge = config_.tailSize > 0 ? 
+      getOldestAgeLocked(LruType::HotTail, currTime) : getOldestAgeLocked(LruType::Hot, currTime);
+  stat.warmQueueStat.projectedAge = config_.tailSize > 0 ? 
+      getProjectedAge(LruType::HotTail, stat.coldQueueStat.oldestElementAge) : getProjectedAge(LruType::Hot, stat.coldQueueStat.oldestElementAge);
 
   return stat;
 }

@@ -258,6 +258,7 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     mhNewConfig.onlyUpdateHitIfRebalance = mhOnlyUpdateHitIfRebalance;
     mhNewConfig.maxFreeMemSlabs = mhMaxFreeMemSlabs;
     mhNewConfig.minDiff = mhMinDiff;
+    mhNewConfig.minDiffRatio = mhMinDiffRatio;
     mhNewConfig.thresholdAI = thresholdAI;
     mhNewConfig.thresholdAD = thresholdAD;
     mhNewConfig.thresholdMI = thresholdMI;

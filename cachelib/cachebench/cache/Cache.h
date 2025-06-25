@@ -684,6 +684,8 @@ Cache<Allocator>::Cache(const CacheConfig& config,
       config_.getRebalanceStrategy(),
       std::chrono::seconds(config_.poolRebalanceIntervalSec),
       config_.poolRebalancerDisableForcedWakeUp);
+  // disable reaper thread
+  allocatorConfig_.enableItemReaperInBackground(std::chrono::milliseconds(0));
 
   allocatorConfig_.poolRebalancerFreeAllocThreshold =
       config_.poolRebalancerFreeAllocThreshold;
