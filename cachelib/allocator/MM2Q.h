@@ -24,7 +24,6 @@
 #pragma GCC diagnostic pop
 
 #include <folly/lang/Align.h>
-#include <folly/logging/xlog.h>
 #include <folly/synchronization/DistributedMutex.h>
 
 #include "cachelib/allocator/Cache.h"
@@ -64,7 +63,7 @@ class MM2Q {
   using SerializationConfigType = serialization::MM2QConfig;
   using SerializationTypeContainer = serialization::MM2QCollection;
 
-  enum LruType { Warm, WarmTail, Hot, HotTail, Cold, ColdTail, NumTypes };
+  enum LruType { Warm, WarmTail, Hot, Cold, ColdTail, NumTypes };
 
   // Config class for MM2Q
   struct Config {
@@ -306,11 +305,7 @@ class MM2Q {
     }
 
     // adding extra config after generating the config: tailSize
-    void addExtraConfig(size_t tSize,
-                        bool coldOnly = false) {
-      tailSize = tSize;
-      countColdTailHitsOnly = coldOnly;
-    }
+    void addExtraConfig(size_t tSize, bool coldOnly=false) { tailSize = tSize; }
 
     // threshold value in seconds to compare with a node's update time to
     // determine if we need to update the position of the node in the linked
@@ -350,8 +345,6 @@ class MM2Q {
     // This should be set by cache allocator through addExtraConfig(); user
     // should not set this manually.
     size_t tailSize{0};
-    // when tracking tail hits, count cold count only.
-    bool countColdTailHitsOnly{false};
 
     // Minimum interval between reconfigurations. If 0, reconfigure is never
     // called.
@@ -366,7 +359,7 @@ class MM2Q {
   // around DList, is thread safe and can be accessed from multiple threads.
   // The current implementation models an LRU using the above DList
   // implementation.
-  template <typename T, Hook<T> T::* HookPtr>
+  template <typename T, Hook<T> T::*HookPtr>
   struct Container {
    private:
     using LruList = MultiDList<T, HookPtr>;
@@ -653,7 +646,6 @@ class MM2Q {
     uint64_t numWarmAccesses_{0};
 
     // number of hits in tail parts
-    uint64_t numHotTailAccesses_{0};
     uint64_t numWarmTailAccesses_{0};
     uint64_t numColdTailAccesses_{0};
 
@@ -688,7 +680,7 @@ class MM2Q {
 };
 
 /* Container Interface Implementation */
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 MM2Q::Container<T, HookPtr>::Container(const serialization::MM2QObject& object,
                                        PtrCompressor compressor)
     : lru_(*object.lrus(), compressor),
@@ -704,14 +696,13 @@ MM2Q::Container<T, HookPtr>::Container(const serialization::MM2QObject& object,
   // tail lists (WarmTail & ColdTail), in order to potentially avoid cold roll
   if (object.lrus()->lists()->size() < LruType::NumTypes) {
     XDCHECK_EQ(false, tailTrackingEnabled_);
-    XDCHECK_EQ(object.lrus()->lists()->size() + 3, LruType::NumTypes);
-    lru_.insertEmptyListAt(LruType::HotTail, compressor);
+    XDCHECK_EQ(object.lrus()->lists()->size() + 2, LruType::NumTypes);
     lru_.insertEmptyListAt(LruType::WarmTail, compressor);
     lru_.insertEmptyListAt(LruType::ColdTail, compressor);
   }
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 bool MM2Q::Container<T, HookPtr>::recordAccess(T& node,
                                                AccessMode mode) noexcept {
   if ((mode == AccessMode::kWrite && !config_.updateOnWrite) ||
@@ -730,14 +721,7 @@ bool MM2Q::Container<T, HookPtr>::recordAccess(T& node,
         return false;
       }
       if (isHot(node)) {
-        if (inTail(node)) {
-          unmarkTail(node);
-          lru_.getList(LruType::HotTail).remove(node);
-          lru_.getList(LruType::Hot).linkAtHead(node);
-          ++numHotTailAccesses_;
-        } else {
-          lru_.getList(LruType::Hot).moveToHead(node);
-        }
+        lru_.getList(LruType::Hot).moveToHead(node);
         ++numHotAccesses_;
       } else if (isCold(node)) {
         if (inTail(node)) {
@@ -787,7 +771,7 @@ bool MM2Q::Container<T, HookPtr>::recordAccess(T& node,
   return false;
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 cachelib::EvictionAgeStat MM2Q::Container<T, HookPtr>::getEvictionAgeStat(
     uint64_t projectedLength) const noexcept {
   return lruMutex_->lock_combine([this, projectedLength]() {
@@ -795,7 +779,7 @@ cachelib::EvictionAgeStat MM2Q::Container<T, HookPtr>::getEvictionAgeStat(
   });
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 cachelib::EvictionAgeStat MM2Q::Container<T, HookPtr>::getEvictionAgeStatLocked(
     uint64_t projectedLength) const noexcept {
   const auto currTime = static_cast<Time>(util::getCurrentTimeSec());
@@ -813,33 +797,18 @@ cachelib::EvictionAgeStat MM2Q::Container<T, HookPtr>::getEvictionAgeStatLocked(
   EvictionAgeStat stat;
 
   stat.hotQueueStat.oldestElementAge =
-      getOldestAgeLocked(LruType::HotTail, currTime);
-  stat.hotQueueStat.size = lru_.getList(LruType::Hot).size() +
-                           lru_.getList(LruType::HotTail).size();
+      getOldestAgeLocked(LruType::Hot, currTime);
+  stat.hotQueueStat.size = lru_.getList(LruType::Hot).size();
   stat.hotQueueStat.projectedAge =
-      getProjectedAge(LruType::HotTail, stat.hotQueueStat.oldestElementAge);
+      getProjectedAge(LruType::Hot, stat.hotQueueStat.oldestElementAge);
 
-  if(config_.hotSizePercent == 100) {
-      // temporary workarounds, since lru_tail_age depends on warm queue stat
-      // todo: change back 
-      stat.warmQueueStat.oldestElementAge =
-          getOldestAgeLocked(LruType::HotTail, currTime);
-      stat.warmQueueStat.size = lru_.getList(LruType::Hot).size() +
-                              lru_.getList(LruType::HotTail).size();
-      stat.warmQueueStat.projectedAge =
-        getProjectedAge(LruType::HotTail, stat.warmQueueStat.oldestElementAge);
-      
-  } else {
-    //sum the tail and the main list for the ones that have tail. originally
-    stat.warmQueueStat.oldestElementAge =
-        getOldestAgeLocked(LruType::WarmTail, currTime);
-    stat.warmQueueStat.size = lru_.getList(LruType::Warm).size() +
-                              lru_.getList(LruType::WarmTail).size();
-    stat.warmQueueStat.projectedAge =
-        getProjectedAge(LruType::WarmTail, stat.warmQueueStat.oldestElementAge);
-
-  }
-  
+  // sum the tail and the main list for the ones that have tail.
+  stat.warmQueueStat.oldestElementAge =
+      getOldestAgeLocked(LruType::WarmTail, currTime);
+  stat.warmQueueStat.size = lru_.getList(LruType::Warm).size() +
+                            lru_.getList(LruType::WarmTail).size();
+  stat.warmQueueStat.projectedAge =
+      getProjectedAge(LruType::WarmTail, stat.warmQueueStat.oldestElementAge);
 
   stat.coldQueueStat.oldestElementAge =
       getOldestAgeLocked(LruType::ColdTail, currTime);
@@ -851,18 +820,18 @@ cachelib::EvictionAgeStat MM2Q::Container<T, HookPtr>::getEvictionAgeStatLocked(
   return stat;
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 uint32_t MM2Q::Container<T, HookPtr>::getOldestAgeLocked(
     LruType lruType, Time currentTime) const noexcept {
   auto it = lru_.rbegin(lruType);
   return it != lru_.rend() ? currentTime - getUpdateTime(*it) : 0;
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 typename MM2Q::LruType MM2Q::Container<T, HookPtr>::getLruType(
     const T& node) const noexcept {
   if (isHot(node)) {
-    return inTail(node) ? LruType::HotTail : LruType::Hot;
+    return LruType::Hot;
   }
   if (isCold(node)) {
     return inTail(node) ? LruType::ColdTail : LruType::Cold;
@@ -870,26 +839,23 @@ typename MM2Q::LruType MM2Q::Container<T, HookPtr>::getLruType(
   return inTail(node) ? LruType::WarmTail : LruType::Warm;
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 void MM2Q::Container<T, HookPtr>::rebalance() noexcept {
-  
-  auto popFrom = [&](LruType lruType) -> T* {
-    auto& lru = lru_.getList(lruType);
-    T* node = lru.getTail();
-    XDCHECK(node);
-    lru.remove(*node);
-    if (lruType == WarmTail || lruType == ColdTail || lruType == HotTail) {
-      unmarkTail(*node);
-    }
-    return node;
-  };
-  
   // shrink Warm (and WarmTail) if their total size is larger than expected
   size_t expectedSize = config_.getWarmSizePercent() * lru_.size() / 100;
   while (lru_.getList(LruType::Warm).size() +
              lru_.getList(LruType::WarmTail).size() >
          expectedSize) {
-
+    auto popFrom = [&](LruType lruType) -> T* {
+      auto& lru = lru_.getList(lruType);
+      T* node = lru.getTail();
+      XDCHECK(node);
+      lru.remove(*node);
+      if (lruType == WarmTail || lruType == ColdTail) {
+        unmarkTail(*node);
+      }
+      return node;
+    };
     // remove from warm tail if it is not empty. if empty, remove from warm.
     T* node = lru_.getList(LruType::WarmTail).size() > 0
                   ? popFrom(LruType::WarmTail)
@@ -901,28 +867,22 @@ void MM2Q::Container<T, HookPtr>::rebalance() noexcept {
 
   // shrink Hot if its size is larger than expected
   expectedSize = config_.hotSizePercent * lru_.size() / 100;
-
-  while (lru_.getList(LruType::Hot).size() +
-             lru_.getList(LruType::HotTail).size() >
-         expectedSize) {
-
-    T* node = lru_.getList(LruType::HotTail).size() > 0
-          ? popFrom(LruType::HotTail)
-          : popFrom(LruType::Hot);
-
+  while (lru_.getList(LruType::Hot).size() > expectedSize) {
+    auto node = lru_.getList(LruType::Hot).getTail();
+    XDCHECK(node);
     XDCHECK(isHot(*node));
+    lru_.getList(LruType::Hot).remove(*node);
     lru_.getList(LruType::Cold).linkAtHead(*node);
     unmarkHot(*node);
     markCold(*node);
   }
 
   // adjust tail sizes for Cold and Warm
-  adjustTail(LruType::Hot);
   adjustTail(LruType::Cold);
   adjustTail(LruType::Warm);
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 bool MM2Q::Container<T, HookPtr>::add(T& node) noexcept {
   const auto currTime = static_cast<Time>(util::getCurrentTimeSec());
   return lruMutex_->lock_combine([this, &node, currTime]() {
@@ -942,14 +902,14 @@ bool MM2Q::Container<T, HookPtr>::add(T& node) noexcept {
   });
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 typename MM2Q::Container<T, HookPtr>::LockedIterator
 MM2Q::Container<T, HookPtr>::getEvictionIterator() const noexcept {
   LockHolder l(*lruMutex_);
   return LockedIterator{std::move(l), lru_.rbegin()};
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 template <typename F>
 void MM2Q::Container<T, HookPtr>::withEvictionIterator(F&& fun) {
   if (config_.useCombinedLockForIterators) {
@@ -960,13 +920,13 @@ void MM2Q::Container<T, HookPtr>::withEvictionIterator(F&& fun) {
   }
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 template <typename F>
 void MM2Q::Container<T, HookPtr>::withContainerLock(F&& fun) {
   lruMutex_->lock_combine([&fun]() { fun(); });
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 void MM2Q::Container<T, HookPtr>::removeLocked(T& node,
                                                bool doRebalance) noexcept {
   LruType type = getLruType(node);
@@ -979,7 +939,7 @@ void MM2Q::Container<T, HookPtr>::removeLocked(T& node,
   return;
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 void MM2Q::Container<T, HookPtr>::setConfig(const Config& newConfig) {
   if (!tailTrackingEnabled_ && newConfig.tailSize > 0) {
     throw std::invalid_argument(
@@ -1000,12 +960,12 @@ void MM2Q::Container<T, HookPtr>::setConfig(const Config& newConfig) {
   });
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 typename MM2Q::Config MM2Q::Container<T, HookPtr>::getConfig() const {
   return lruMutex_->lock_combine([this]() { return config_; });
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 bool MM2Q::Container<T, HookPtr>::remove(T& node) noexcept {
   return lruMutex_->lock_combine([this, &node]() {
     if (!node.isInMMContainer()) {
@@ -1016,7 +976,7 @@ bool MM2Q::Container<T, HookPtr>::remove(T& node) noexcept {
   });
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 void MM2Q::Container<T, HookPtr>::remove(Iterator& it) noexcept {
   T& node = *it;
   XDCHECK(node.isInMMContainer());
@@ -1028,7 +988,7 @@ void MM2Q::Container<T, HookPtr>::remove(Iterator& it) noexcept {
   removeLocked(node, /* doRebalance = */ false);
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 bool MM2Q::Container<T, HookPtr>::replace(T& oldNode, T& newNode) noexcept {
   return lruMutex_->lock_combine([this, &oldNode, &newNode]() {
     if (!oldNode.isInMMContainer() || newNode.isInMMContainer()) {
@@ -1039,9 +999,6 @@ bool MM2Q::Container<T, HookPtr>::replace(T& oldNode, T& newNode) noexcept {
     LruType type = getLruType(oldNode);
     lru_.getList(type).replace(oldNode, newNode);
     switch (type) {
-    case LruType::HotTail:
-      markTail(newNode);
-      [[fallthrough]]; // pass through to also mark hot
     case LruType::Hot:
       markHot(newNode);
       break;
@@ -1067,11 +1024,9 @@ bool MM2Q::Container<T, HookPtr>::replace(T& oldNode, T& newNode) noexcept {
   });
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 MM2Q::LruType MM2Q::Container<T, HookPtr>::getTailLru(LruType list) const {
   switch (list) {
-  case LruType::Hot:
-    return LruType::HotTail;
   case LruType::Warm:
     return LruType::WarmTail;
   case LruType::Cold:
@@ -1082,7 +1037,7 @@ MM2Q::LruType MM2Q::Container<T, HookPtr>::getTailLru(LruType list) const {
   }
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 void MM2Q::Container<T, HookPtr>::adjustTail(LruType list) {
   auto tailList = getTailLru(list);
   auto ptr = lru_.getList(list).getTail();
@@ -1094,7 +1049,7 @@ void MM2Q::Container<T, HookPtr>::adjustTail(LruType list) {
   }
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 serialization::MM2QObject MM2Q::Container<T, HookPtr>::saveState()
     const noexcept {
   serialization::MM2QConfig configObject;
@@ -1113,7 +1068,7 @@ serialization::MM2QObject MM2Q::Container<T, HookPtr>::saveState()
   return object;
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 MMContainerStat MM2Q::Container<T, HookPtr>::getStats() const noexcept {
   return lruMutex_->lock_combine([this]() {
     auto* tail = lru_.size() == 0 ? nullptr : lru_.rbegin().get();
@@ -1138,45 +1093,19 @@ MMContainerStat MM2Q::Container<T, HookPtr>::getStats() const noexcept {
     // we cannot do that here because this critical section returns more data
     // than can be coalesced internally by folly::DistributedMutex (> 48 bytes).
     // So we construct and return the entire object under the lock.
-
-    auto coldTailSize = lru_.getList(LruType::ColdTail).size();
-    auto warmTailSize = lru_.getList(LruType::WarmTail).size();
-    auto hotTailSize = lru_.getList(LruType::HotTail).size();
-  
-
-    uint64_t numTailAccesses =
-        config_.hotSizePercent == 100 ? numHotTailAccesses_ : 
-            (config_.countColdTailHitsOnly
-                ? numColdTailAccesses_
-                : (computeWeightedAccesses(numWarmTailAccesses_,
-                  numColdTailAccesses_)));
-
-    // config_.tailSize/coldtailsize
-    XLOGF(DBG,
-          "2Q expected tail size: {}, hot tail size: {}, warm tail size: {}, cold tail size: {}\n"
-          "hot tail hits: {}, warm tail hits: {}, cold tail hits: {}\n"
-          "weighted numTailAccesses: {}",
-          config_.tailSize, 
-          lru_.getList(LruType::HotTail).size(),
-          lru_.getList(LruType::WarmTail).size(),
-          lru_.getList(LruType::ColdTail).size(), 
-          numHotTailAccesses_,
-          numWarmTailAccesses_,
-          numColdTailAccesses_, 
-          numTailAccesses);
-
-    return MMContainerStat{lru_.size(),
-                           tail == nullptr ? 0 : getUpdateTime(*tail),
-                           lruRefreshTime_.load(std::memory_order_relaxed),
-                           numHotAccesses_,
-                           numColdAccesses_,
-                           numWarmAccesses_,
-                           numTailAccesses,
-                           0};
+    return MMContainerStat{
+        lru_.size(),
+        tail == nullptr ? 0 : getUpdateTime(*tail),
+        lruRefreshTime_.load(std::memory_order_relaxed),
+        numHotAccesses_,
+        numColdAccesses_,
+        numWarmAccesses_,
+        computeWeightedAccesses(numWarmTailAccesses_, numColdTailAccesses_),
+        0};
   });
 }
 
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 void MM2Q::Container<T, HookPtr>::reconfigureLocked(const Time& currTime) {
   if (currTime < nextReconfigureTime_) {
     return;
@@ -1194,7 +1123,7 @@ void MM2Q::Container<T, HookPtr>::reconfigureLocked(const Time& currTime) {
 }
 
 // Iterator Context Implementation
-template <typename T, MM2Q::Hook<T> T::* HookPtr>
+template <typename T, MM2Q::Hook<T> T::*HookPtr>
 MM2Q::Container<T, HookPtr>::LockedIterator::LockedIterator(
     LockHolder l, const Iterator& iter) noexcept
     : Iterator(iter), l_(std::move(l)) {}
