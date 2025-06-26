@@ -671,11 +671,11 @@ Cache<Allocator>::Cache(const CacheConfig& config,
   constexpr size_t MB = 1024ULL * 1024ULL;
 
   // for now do this for every one
-  allocatorConfig_.enableTailHitsTracking();
-  // if (config_.rebalanceStrategy == "marginal-hits" ||
-  //     config_.rebalanceStrategy == "hits-per-tail-slab") {
-  //       allocatorConfig_.enableTailHitsTracking();
-  // }
+  //allocatorConfig_.enableTailHitsTracking();
+  if (config_.rebalanceStrategy == "marginal-hits" ||
+      config_.rebalanceStrategy == "marginal-hits-new" || config_.rebalanceStrategy == "marginal-hits-old") {
+        allocatorConfig_.enableTailHitsTracking();
+  }
   if (config_.rebalanceStrategy == "lama") {
     allocatorConfig_.enableFootPrintMrc = true;
   }
@@ -956,7 +956,7 @@ Cache<Allocator>::Cache(const CacheConfig& config,
       const PoolId pid = cache_->addPool(
           folly::sformat("pool_{}", i), poolSize, {} /* allocSizes */, mmConfig,
           nullptr /* rebalanceStrategy */, nullptr /* resizeStrategy */,
-          true /* ensureSufficientMem */);
+          false /* ensureSufficientMem */); // originally this is true to ensure that each class has at least one slab, but we don't want this behavior
       pools_.push_back(pid);
     }
   }

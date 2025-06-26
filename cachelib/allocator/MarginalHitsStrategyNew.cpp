@@ -103,7 +103,15 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
           "Rebalancing: effective move rate = {}, window size = {}",
           effectiveMoveRate,
           windowSize);
-    if(effectiveMoveRate <= 0.5 && windowSize >= classes.size()) {
+
+    size_t classWithHits = 0;
+    for (const auto& cid : classes) {
+        if (poolState.at(cid).deltaHits(poolStats) > 0) {
+            ++classWithHits;
+        }
+    }
+
+    if(effectiveMoveRate <= 0.5 && windowSize >= config.thresholdIncMinWindowSize) {
         if(config.thresholdAI) {
           updateMinDff(config.minDiff + 5);
           clearPoolRebalanceEvent(pid);
@@ -112,7 +120,7 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
           clearPoolRebalanceEvent(pid);
         }
         
-    } else if (effectiveMoveRate >= 0.95 && windowSize >= classes.size()) {
+    } else if (effectiveMoveRate >= 0.95 && windowSize >= classWithHits) {
         if(config.thresholdAD) {
           updateMinDff(std::max(2.0, config.minDiff - 5));
           clearPoolRebalanceEvent(pid);

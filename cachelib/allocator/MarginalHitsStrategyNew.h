@@ -30,7 +30,7 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
   // Config class for marginal hits strategy
   struct Config : public BaseConfig {
     // parameter for moving average, to smooth the ranking
-    double movingAverageParam{0.3};
+    double movingAverageParam{0.0};
 
     // minimum number of slabs to retain in every allocation class.
     unsigned int minSlabs{1};
@@ -39,15 +39,16 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
     // class
     unsigned int maxFreeMemSlabs{1};
 
-    bool onlyUpdateHitIfRebalance{false};
+    bool onlyUpdateHitIfRebalance{true};
 
     double minDiff{2.0};
-    double minDiffRatio{0.1};
+    double minDiffRatio{0.05};
 
+    unsigned int thresholdIncMinWindowSize{5};
     bool thresholdAI{false};
-    bool thresholdMI{false};
+    bool thresholdMI{true};
     bool thresholdAD{false};
-    bool thresholdMD{false};
+    bool thresholdMD{true};
 
     Config() noexcept {}
     explicit Config(double param) noexcept : Config(param, 1, 1) {}
@@ -69,7 +70,7 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
       return;
     }
     std::lock_guard<std::mutex> l(configLock_);
-    XLOGF(INFO, "Updating minDiff from {} to {}", config_.minDiff, newValue);
+    XLOGF(DBG, "Updating minDiff from {} to {}", config_.minDiff, newValue);
     config_.minDiff = newValue;
   }
 

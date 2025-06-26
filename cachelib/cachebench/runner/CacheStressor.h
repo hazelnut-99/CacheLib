@@ -92,7 +92,7 @@ class CacheStressor : public Stressor {
     // this needs to happen befor cache is created
     if (config_.useTraceTimer) {
       XLOG(INFO) << "Using trace timer";
-      mockTimerHandle_ = dlopen("/mydata/hongshu/libmock_time.so", RTLD_LAZY);
+      mockTimerHandle_ = dlopen("/nfs/hongshu/libmock_time.so", RTLD_LAZY);
       setMockTimeFunc_ =
           (set_mock_time_t)dlsym(mockTimerHandle_, "set_mock_time");
       setMockTimeFunc_(0, 0);
@@ -490,14 +490,14 @@ class CacheStressor : public Stressor {
             //v2: MD
             if(useAdaptiveRebalanceIntervalV2_ && effectiveMoveRate >= 0.95 && rebalanceEventCount >= cache_->getNumClassId(pid)){
               auto newInterval = std::max<uint64_t>(rebalanceIntervalInUse_ / increaseIntervalFactor_, 1);
-              XLOGF(INFO, "Effective movement rate is high ({}, {}), decreasing "
+              XLOGF(DBG, "Effective movement rate is high ({}, {}), decreasing "
                         "the rebalance interval, from {} : {}", effectiveMoveRate, rebalanceEventCount, rebalanceIntervalInUse_, newInterval);
               updateRebalanceInterval(i, newInterval, "MD");
               cache_->clearRebalancerPoolEventMap(pid);
             }
             //v1: MI
             if (effectiveMoveRate < 0.5 && rebalanceEventCount >= 5) {
-              XLOGF(INFO, "Effective movement rate is low ({}, {}), increasing "
+              XLOGF(DBG, "Effective movement rate is low ({}, {}), increasing "
                         "the rebalance interval, from {} : {}", effectiveMoveRate, rebalanceEventCount, rebalanceIntervalInUse_, rebalanceIntervalInUse_ * increaseIntervalFactor_);
               auto newInterval = rebalanceIntervalInUse_ * increaseIntervalFactor_;
               updateRebalanceInterval(i, newInterval, "MI");

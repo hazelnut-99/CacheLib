@@ -80,7 +80,7 @@ struct CacheConfig : public JSONConfig {
   unsigned int poolRebalancerFreeAllocThreshold{0};
   bool poolRebalancerDisableForcedWakeUp{false};
   uint64_t wakeUpRebalancerEveryXReqs{0};
-  uint64_t anomalyDetectionFrequency{100000};
+  uint64_t anomalyDetectionFrequency{0}; // disabled
   unsigned int increaseIntervalFactor{2};
   bool syncRebalance{true};
   bool useAdaptiveRebalanceInterval{false};
