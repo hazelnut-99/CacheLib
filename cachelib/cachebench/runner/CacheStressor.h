@@ -192,7 +192,7 @@ class CacheStressor : public Stressor {
             std::thread([this, throughputStats = &throughputStats_.at(i),
                          threadName = folly::sformat("cb_stressor_{}", i)]() {
               folly::setThreadName(threadName);
-              stressByDiscreteDistribution(*throughputStats);
+              stressByDiscreteDistribution(*throughputStats, i);
             }));
       }
       for (auto& worker : workers) {
@@ -316,7 +316,7 @@ class CacheStressor : public Stressor {
   // Throughput and Hit/Miss rates are tracked here as well
   //
   // @param stats       Throughput stats
-  void stressByDiscreteDistribution(ThroughputStats& stats) {
+  void stressByDiscreteDistribution(ThroughputStats& stats, uint64_t threadIdx) {
     std::mt19937_64 gen(folly::Random::rand64());
     std::discrete_distribution<> opPoolDist(config_.opPoolDistribution.begin(),
                                             config_.opPoolDistribution.end());
@@ -477,10 +477,10 @@ class CacheStressor : public Stressor {
 
       
 
-        if((i - lastRebalanceTime_) >= rebalanceIntervalInUse_ && !rebalancerDisabled_) {
+        if ((threadIdx == 0) && (i - lastRebalanceTime_) >= (rebalanceIntervalInUse_ / config_.numThreads) && !rebalancerDisabled_) {
           cache_->wakeupPoolRebalancer(syncRebalance_, i);
           lastRebalanceTime_ = i;
-          cache_->addRebalanceRequestId(i);
+          //cache_->addRebalanceRequestId(i);
           double emr = cache_->getEffectiveMovementRate(pid);
           //cache_->addEffectiveMovementRate(emr);
         
