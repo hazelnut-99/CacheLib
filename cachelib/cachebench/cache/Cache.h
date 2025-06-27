@@ -612,6 +612,15 @@ inline typename TinyLFUAllocator::MMConfig makeMMConfig(
       config.lruRefreshSec, config.lruUpdateOnWrite, config.lruUpdateOnRead);
 }
 
+// TinyLFUTail
+// todo: add more parameter for lfu (see MMTinyLFU.h)
+template <>
+inline typename TinyLFUTailAllocator::MMConfig makeMMConfig(
+    CacheConfig const& config) {
+  return TinyLFUTailAllocator::MMConfig(
+      config.lruRefreshSec, config.lruUpdateOnWrite, config.lruUpdateOnRead);
+}
+
 // 3q with two tails
 template <>
 inline typename Simple3QAllocator::MMConfig makeMMConfig(

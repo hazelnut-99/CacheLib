@@ -6116,4 +6116,7 @@ using Simple3QAllocator =
     CacheAllocator<Simple3QCacheTrait>; // Simple 3Q eviction policy  
 
 using Simple2QAllocator = CacheAllocator<Simple2QCacheTrait>;
+
+using TinyLFUTailAllocator =
+    CacheAllocator<TinyLFUTailCacheTrait>; // TinyLFU with tail hits
 } // namespace facebook::cachelib

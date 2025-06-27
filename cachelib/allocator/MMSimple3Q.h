@@ -805,9 +805,11 @@ cachelib::EvictionAgeStat MMSimple3Q::Container<T, HookPtr>::getEvictionAgeStatL
   
   stat.warmQueueStat.oldestElementAge =
       getOldestAgeLocked(LruType::ColdTail, currTime);
+  stat.warmQueueStat.size = lru_.getList(LruType::Hot).size() +
+                            lru_.getList(LruType::HotTail).size() +
+                            lru_.getList(LruType::ColdTail).size();
   stat.warmQueueStat.projectedAge =
-      getProjectedAge(LruType::ColdTail, stat.coldQueueStat.oldestElementAge);
-
+      getProjectedAge(LruType::ColdTail, stat.warmQueueStat.oldestElementAge);
   return stat;
 }
 
