@@ -190,7 +190,7 @@ class CacheStressor : public Stressor {
       for (uint64_t i = 0; i < config_.numThreads; ++i) {
         workers.push_back(
             std::thread([this, throughputStats = &throughputStats_.at(i),
-                         threadName = folly::sformat("cb_stressor_{}", i)]() {
+                        threadName = folly::sformat("cb_stressor_{}", i), i]() {
               folly::setThreadName(threadName);
               stressByDiscreteDistribution(*throughputStats, i);
             }));

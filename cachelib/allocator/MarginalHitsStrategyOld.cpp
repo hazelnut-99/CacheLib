@@ -59,10 +59,19 @@ RebalanceContext MarginalHitsStrategyOld::pickVictimAndReceiverImpl(
   }
   classStates_[pid].updateRankings(scores, config.movingAverageParam);
   RebalanceContext ctx = pickVictimAndReceiverFromRankings(pid, validVictim, validReceiver);
+  
+  //// this part is new
   auto& poolState = getPoolState(pid);
   for (const auto i : poolStats.getClassIds()) {
       poolState[i].updateTailHits(poolStats);
   }
+  // this is for interval-mimd
+  if(ctx.isEffective()){
+    // max window size: 2 * n_classes
+    recordRebalanceEvent(pid, ctx, classes.size() * 2);
+  }
+  /////
+
   return ctx;
 }
 
