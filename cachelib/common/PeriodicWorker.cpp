@@ -90,6 +90,9 @@ bool PeriodicWorker::start(const std::chrono::milliseconds sleepInterval,
    * Set the name of the thread
    */
   folly::setThreadName(workerThread_->native_handle(), thread_name);
+  // threadName_ = thread_name.str();
+  // cycleCounter_.emplace();
+  // cycleCounterStart_ = cycleCounter_->read();
 
   return true;
 }
@@ -142,6 +145,16 @@ bool PeriodicWorker::stop(const std::chrono::milliseconds timeout) {
     if (tmp->joinable()) {
       tmp->join();
     }
+
+    // if (cycleCounter_) {
+    //   uint64_t after = cycleCounter_->read();
+    //   uint64_t delta = after - cycleCounterStart_;
+    //   std::cout << "[PeriodicWorker] Thread (name: "
+    //             << (threadName_.empty() ? "unnamed" : threadName_)
+    //             << ") CPU cycles: " << delta << std::endl;
+    //   cycleCounter_->stop();
+    //   cycleCounter_.reset();
+    // }
   }
   return true;
 }

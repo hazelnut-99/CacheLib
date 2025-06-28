@@ -45,6 +45,7 @@
 #include "cachelib/cachebench/workload/GeneratorBase.h"
 #include "cachelib/common/DistributionAnomalyDetector.h"
 #include "cachelib/common/EWMA.h"
+#include "cachelib/common/ThreadCpuCycleCounter.h"
 
 typedef void (*set_mock_time_t)(time_t, long);
 
@@ -352,6 +353,10 @@ class CacheStressor : public Stressor {
     std::optional<uint64_t> lastRequestId = std::nullopt;
     std::optional<uint64_t> lastRequestTs = std::nullopt;
     updateRebalanceInterval(0, rebalanceIntervalInUse_, "init");
+    
+    // facebook::cachelib::ThreadCpuCycleCounter cycleCounter;
+    // uint64_t cyclesBefore = cycleCounter.read();
+
     for (uint64_t i = 0;
          i < config_.numOps &&
          cache_->getInconsistencyCount() < config_.maxInconsistencyCount &&
@@ -677,6 +682,11 @@ class CacheStressor : public Stressor {
         break;
       }
     }
+
+    // uint64_t cyclesAfter = cycleCounter.read();
+    // uint64_t cyclesDelta = cyclesAfter - cyclesBefore;
+    // std::cout << "CPU cycles for serving requests: " << cyclesDelta << std::endl;
+    // cycleCounter.stop(); 
     wg_->markFinish();
   }
 

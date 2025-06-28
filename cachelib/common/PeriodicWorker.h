@@ -24,6 +24,9 @@
 #include <limits>
 #include <mutex>
 #include <thread>
+#include <optional>
+
+#include "cachelib/common/ThreadCpuCycleCounter.h"
 
 namespace facebook {
 namespace cachelib {
@@ -140,6 +143,10 @@ class PeriodicWorker {
 
   /* The main worker loop that handles the work periodically */
   void loop(void);
+
+  std::optional<facebook::cachelib::ThreadCpuCycleCounter> cycleCounter_;
+  uint64_t cycleCounterStart_{0};
+  std::string threadName_;
 };
 
 namespace util {
