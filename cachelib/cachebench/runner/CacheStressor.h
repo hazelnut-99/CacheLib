@@ -29,6 +29,12 @@
 #include <thread>
 #include <unordered_set>
 
+#include <time.h>
+#include <unistd.h> 
+#include <sys/syscall.h>
+#include <chrono>
+
+
 #include "cachelib/cachebench/cache/Cache.h"
 #include "cachelib/cachebench/cache/TimeStampTicker.h"
 #include "cachelib/cachebench/runner/Stressor.h"
@@ -178,7 +184,8 @@ class CacheStressor : public Stressor {
   void start() override {
     {
       std::lock_guard<std::mutex> l(timeMutex_);
-      startTime_ = std::chrono::system_clock::now();
+      //startTime_ = std::chrono::system_clock::now();
+      startTime_ = getRealTime();
     }
     std::cout << folly::sformat("Total {:.2f}M ops to be run",
                                 config_.numThreads * config_.numOps / 1e6)
@@ -200,7 +207,9 @@ class CacheStressor : public Stressor {
       }
       {
         std::lock_guard<std::mutex> l(timeMutex_);
-        endTime_ = std::chrono::system_clock::now();
+        //endTime_ = std::chrono::system_clock::now();
+        endTime_ = getRealTime();
+
       }
     });
   }
@@ -260,9 +269,14 @@ class CacheStressor : public Stressor {
 
   uint64_t getTestDurationNs() const override {
     std::lock_guard<std::mutex> l(timeMutex_);
-    return std::chrono::nanoseconds{
-        std::min(std::chrono::system_clock::now(), endTime_) - startTime_}
+    // return std::chrono::nanoseconds{
+    //     std::min(std::chrono::system_clock::now(), endTime_) - startTime_}
+    //     .count();
+    auto result = std::chrono::nanoseconds{
+        std::min(getRealTime(), endTime_) - startTime_}
         .count();
+    XLOGF(INFO, "Test duration: {} ns", result);
+    return result;
   }
 
  private:
@@ -817,6 +831,25 @@ void updateRebalanceInterval(uint64_t requestId, uint64_t newInterval, std::stri
     if(rebalanceIntervalInUse_ < minRebalanceInterval_) {
       minRebalanceInterval_ = rebalanceIntervalInUse_;
     }
+}
+
+std::chrono::system_clock::time_point getRealTime() const {
+    struct timespec ts;
+
+    // Use CLOCK_REALTIME to get the wall-clock time since the Unix epoch.
+    if (syscall(__NR_clock_gettime, CLOCK_REALTIME, &ts) != 0) {
+        throw std::runtime_error("Failed to get real time from kernel");
+    }
+
+    // Explicitly define the duration types using the std::chrono namespace.
+    std::chrono::seconds secs(ts.tv_sec);
+    std::chrono::nanoseconds ns(ts.tv_nsec);
+
+    // The time_point is constructed from a duration starting from the clock's epoch.
+    // We cast the combined duration to the native duration of the system_clock.
+    return std::chrono::system_clock::time_point(
+        std::chrono::duration_cast<std::chrono::system_clock::duration>(secs + ns)
+    );
 }
 
   const StressorConfig config_; // config for the stress run

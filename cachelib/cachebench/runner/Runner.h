@@ -44,7 +44,9 @@ class Runner {
   // @return true if the run was successful, false if there is a failure.
   bool run(std::chrono::seconds progressInterval,
            const std::string& progressStatsFile,
-           const std::string& dumpResultJsonFile);
+           const std::string& dumpResultJsonFile,
+          bool disableProgressTracker,
+         const std::string& dumpTxFile);
 
   // for testings using folly::Benchmark
   // in addition to running time, cachebench has several metrics

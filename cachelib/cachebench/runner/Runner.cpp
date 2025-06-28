@@ -17,6 +17,10 @@
 #include "cachelib/cachebench/runner/Runner.h"
 
 #include "cachelib/cachebench/runner/Stressor.h"
+#include <folly/Random.h>
+#include <folly/dynamic.h>
+#include <folly/json.h>
+#include <fstream>
 
 namespace facebook {
 namespace cachelib {
@@ -27,13 +31,19 @@ Runner::Runner(const CacheBenchConfig& config)
 
 bool Runner::run(std::chrono::seconds progressInterval,
                  const std::string& progressStatsFile,
-                 const std::string& dumpResultJsonFile) {
+                 const std::string& dumpResultJsonFile,
+                 bool disableProgressTracker,
+         const std::string& dumpTxFile) {
   ProgressTracker tracker{*stressor_, progressStatsFile};
 
   stressor_->start();
 
-  if (!tracker.start(progressInterval)) {
-    throw std::runtime_error("Cannot start ProgressTracker.");
+  if (!disableProgressTracker) {
+    if (!tracker.start(progressInterval)) {
+      throw std::runtime_error("Cannot start ProgressTracker.");
+    }
+  } else {
+    std::cout << "Progress tracker is disabled. " << std::endl;
   }
 
   stressor_->finish();
@@ -41,12 +51,39 @@ bool Runner::run(std::chrono::seconds progressInterval,
   uint64_t durationNs = stressor_->getTestDurationNs();
   auto cacheStats = stressor_->getCacheStats();
   auto opsStats = stressor_->aggregateThroughputStats();
-  tracker.stop();
+  if (!disableProgressTracker) {
+    tracker.stop();
+  }
 
   std::cout << "== Test Results ==\n== Allocator Stats ==" << std::endl;
   cacheStats.render(std::cout);
 
   std::cout << "\n== Throughput for  ==\n";
+  std::cout << "\n== Duration: " << (static_cast<double>(durationNs) / 1e9) << " s) ==\n";
+  std::cout << "== Ops: " << opsStats.ops << " ==\n";
+  std::cout << "== Throughput: "
+          << opsStats.ops / (static_cast<double>(durationNs) / 1e9)  << " ==\n";
+  
+    if (!dumpTxFile.empty()) {
+      auto uuid = folly::sformat("{:016x}-{:016x}",
+                                folly::Random::secureRand64(),
+                                folly::Random::secureRand64());
+      std::string outFile = dumpTxFile + "." + uuid + ".json";
+
+    folly::dynamic j = folly::dynamic::object;
+    j["duration_ns"] = durationNs;
+    j["ops"] = opsStats.ops;
+    j["throughput"] = static_cast<double>(opsStats.ops) / (static_cast<double>(durationNs) / 1e9);
+
+    std::ofstream ofs(outFile);
+    if (ofs) {
+      ofs << folly::toPrettyJson(j) << std::endl;
+      std::cout << "== Throughput JSON written to " << outFile << std::endl;
+    } else {
+      std::cerr << "Failed to write throughput JSON to " << outFile << std::endl;
+    }
+  }
+
   opsStats.render(durationNs, std::cout);
 
   if (!dumpResultJsonFile.empty()) {

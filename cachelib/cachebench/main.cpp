@@ -59,7 +59,10 @@ DEFINE_int32(timeout_seconds,
              0,
              "Maximum allowed seconds for running test. 0 means no timeout");
 DEFINE_bool(enable_debug_log, false, "Enable debug logging");
-
+DEFINE_bool(disable_progress_tracker, false, "Disable the progress tracker in cachebench");
+DEFINE_string(dump_tx_file,
+              "",
+              "File to log the throughput during the test");
 struct sigaction act;
 std::unique_ptr<facebook::cachelib::cachebench::Runner> runnerInstance;
 std::unique_ptr<std::thread> stopperThread;
@@ -164,7 +167,9 @@ int main(int argc, char** argv) {
 
     return runnerInstance->run(std::chrono::seconds(FLAGS_progress),
                                FLAGS_progress_stats_file,
-                               FLAGS_dump_result_json_file)
+                               FLAGS_dump_result_json_file,
+                               FLAGS_disable_progress_tracker,
+                              FLAGS_dump_tx_file)
                ? 0
                : 1;
   } catch (const std::exception& e) {
