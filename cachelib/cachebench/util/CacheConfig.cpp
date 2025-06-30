@@ -263,7 +263,7 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     mhNewConfig.thresholdAD = thresholdAD;
     mhNewConfig.thresholdMI = thresholdMI;
     mhNewConfig.thresholdMD = thresholdMD;
-    mhNewConfig.minRequestsObserved = mhMinRequestsObserved;
+    mhNewConfig.minRequestsObserved = minRequestsObserved;
 
     return std::make_shared<MarginalHitsStrategyNew>(mhNewConfig);
   } else if (rebalanceStrategy == "marginal-hits-old") {
