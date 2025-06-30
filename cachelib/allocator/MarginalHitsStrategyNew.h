@@ -50,6 +50,9 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
     bool thresholdAD{false};
     bool thresholdMD{true};
 
+    double emrLow{0.5};
+    double emrHigh{0.95};
+
     uint64_t minRequestsObserved{0};
 
     Config() noexcept {}
@@ -67,13 +70,14 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
     config_ = static_cast<const Config&>(baseConfig);
   }
 
-  void updateMinDff(double newValue) {
+  bool updateMinDff(double newValue) {
     if(config_.minDiff == newValue){
-      return;
+      return false;
     }
     std::lock_guard<std::mutex> l(configLock_);
-    XLOGF(INFO, "Updating minDiff from {} to {}", config_.minDiff, newValue);
+    XLOGF(DBG, "Updating minDiff from {} to {}", config_.minDiff, newValue);
     config_.minDiff = newValue;
+    return true;
   }
 
   explicit MarginalHitsStrategyNew(Config config = {});

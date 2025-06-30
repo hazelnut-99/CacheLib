@@ -106,13 +106,6 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
   // self-tuning threshold for the next round.
   if(ctx.isEffective()){
     // max window size: 2 * n_classes
-    recordRebalanceEvent(pid, ctx, classes.size() * 2);
-    auto effectiveMoveRate = queryEffectiveMoveRate(pid);
-    auto windowSize = getRebalanceEventQueueSize(pid);
-    XLOGF(DBG, 
-          "Rebalancing: effective move rate = {}, window size = {}",
-          effectiveMoveRate,
-          windowSize);
 
     size_t classWithHits = 0;
     for (const auto& cid : classes) {
@@ -120,24 +113,35 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
             ++classWithHits;
         }
     }
-
-    if(effectiveMoveRate <= 0.5 && windowSize >= config.thresholdIncMinWindowSize) {
+    recordRebalanceEvent(pid, ctx, classWithHits * 2);
+    auto effectiveMoveRate = queryEffectiveMoveRate(pid);
+    auto windowSize = getRebalanceEventQueueSize(pid);
+    XLOGF(DBG, 
+          "Rebalancing: effective move rate = {}, window size = {}, diff = {}, ({}->{})",
+          effectiveMoveRate,
+          windowSize, ctx.diffValue, static_cast<int>(ctx.victimClassId), static_cast<int>(ctx.receiverClassId));
+  
+    if(effectiveMoveRate <= config.emrLow && windowSize >= config.thresholdIncMinWindowSize) {
         if(config.thresholdAI) {
           auto currentMin = getMinDiffValueFromRebalanceEvents(pid);
-          updateMinDff(currentMin + 2);
-          clearPoolRebalanceEvent(pid);
+          if(updateMinDff(currentMin + 2)) {
+            clearPoolRebalanceEvent(pid);
+          }
         } else if (config.thresholdMI){
-          updateMinDff(config.minDiff * 2);
-          clearPoolRebalanceEvent(pid);
+          if(updateMinDff(config.minDiff * 2)) {
+            clearPoolRebalanceEvent(pid);
+          }
         }
         
-    } else if (effectiveMoveRate >= 0.95 && windowSize >= classWithHits) {
+    } else if (effectiveMoveRate >= config.emrHigh && windowSize >= classWithHits) {
         if(config.thresholdAD) {
-          updateMinDff(std::max(2.0, config.minDiff - 2));
-          clearPoolRebalanceEvent(pid);
+          if(updateMinDff(std::max(2.0, config.minDiff - 2))) {
+            clearPoolRebalanceEvent(pid);
+          }
         } else if (config.thresholdMD){
-          updateMinDff(std::max(2.0, config.minDiff / 2));
-          clearPoolRebalanceEvent(pid);
+          if(updateMinDff(std::max(2.0, config.minDiff / 2))) {
+            clearPoolRebalanceEvent(pid);
+          }
         }
     }
   }
