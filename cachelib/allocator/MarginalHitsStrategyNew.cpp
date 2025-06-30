@@ -41,6 +41,8 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
           static_cast<int>(pid));
     return kNoOpContext;
   }
+
+
   auto scores = computeClassMarginalHits(pid, poolStats, config.movingAverageParam);
   auto classesSet = poolStats.getClassIds();
   std::vector<ClassId> classes(classesSet.begin(), classesSet.end());
@@ -65,12 +67,19 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
   // we don't rely on this decay anymore
   classStates_[pid].updateRankings(scores, 0.0);
   RebalanceContext ctx = pickVictimAndReceiverFromRankings(pid, validVictim, validReceiver);
+
+  auto numRequestObserved = computeNumRequests(pid, poolStats);
+  if(!force && numRequestObserved < config.minRequestsObserved) {
+    XLOGF(DBG, "haven't observed enough requests: {}/{}, wait until next round", numRequestObserved, config.minRequestsObserved);
+    ctx = kNoOpContext;
+  }
   if(!force && ctx.isEffective()) {
     //extra filterings
     auto receiverScore = scores.at(ctx.receiverClassId);
     auto victimScore = scores.at(ctx.victimClassId);
     auto improvement = receiverScore - victimScore;
     auto improvementRatio = improvement / (victimScore == 0 ? 1 : victimScore);
+    ctx.diffValue = improvement;
     if ((config.minDiff > 0 && improvement < config.minDiff) || 
         (config.minDiffRatio > 0 && improvementRatio < config.minDiffRatio)){
         XLOGF(DBG, "Not enough to trigger rebalancing, receiver id: {}, victim id: {}, receiver score: {}, victim score: {}, improvement: {}, improvement ratio: {}, thresh1: {}, thresh2: {}",
@@ -87,9 +96,10 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
     ctx = kNoOpContext;
   }
   auto& poolState = getPoolState(pid);
-  if(ctx.isEffective() || !config.onlyUpdateHitIfRebalance) {
-      for (const auto i : poolStats.getClassIds()) {
+  if((ctx.isEffective() || !config.onlyUpdateHitIfRebalance) && numRequestObserved >= config.minRequestsObserved) {  
+    for (const auto i : poolStats.getClassIds()) {
         poolState[i].updateTailHits(poolStats, config.movingAverageParam);
+        poolState[i].updateRequests(poolStats);
       }
   }
 
@@ -113,7 +123,8 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
 
     if(effectiveMoveRate <= 0.5 && windowSize >= config.thresholdIncMinWindowSize) {
         if(config.thresholdAI) {
-          updateMinDff(config.minDiff + 5);
+          auto currentMin = getMinDiffValueFromRebalanceEvents(pid);
+          updateMinDff(currentMin + 2);
           clearPoolRebalanceEvent(pid);
         } else if (config.thresholdMI){
           updateMinDff(config.minDiff * 2);
@@ -122,7 +133,7 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
         
     } else if (effectiveMoveRate >= 0.95 && windowSize >= classWithHits) {
         if(config.thresholdAD) {
-          updateMinDff(std::max(2.0, config.minDiff - 5));
+          updateMinDff(std::max(2.0, config.minDiff - 2));
           clearPoolRebalanceEvent(pid);
         } else if (config.thresholdMD){
           updateMinDff(std::max(2.0, config.minDiff / 2));
@@ -153,6 +164,17 @@ MarginalHitsStrategyNew::computeClassMarginalHits(PoolId pid,
     }
   }
   return scores;
+}
+
+size_t MarginalHitsStrategyNew::computeNumRequests(
+    PoolId pid, const PoolStats& poolStats) const {
+  const auto& poolState = getPoolState(pid);
+  size_t totalRequests = 0;
+  auto classesSet = poolStats.getClassIds();
+  for (const auto& cid : classesSet) {
+    totalRequests += poolState.at(cid).deltaRequests(poolStats);
+  }
+  return totalRequests;
 }
 
 RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverFromRankings(

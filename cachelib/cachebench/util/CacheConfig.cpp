@@ -174,7 +174,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   // if you added new fields to the configuration, update the JSONSetVal
   // to make them available for the json configs and increment the size
   // below
-  checkCorrectSize<CacheConfig, 1016>();
+  checkCorrectSize<CacheConfig, 1024>();
 
   if (numPools != poolSizes.size()) {
     throw std::invalid_argument(folly::sformat(
@@ -263,6 +263,7 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     mhNewConfig.thresholdAD = thresholdAD;
     mhNewConfig.thresholdMI = thresholdMI;
     mhNewConfig.thresholdMD = thresholdMD;
+    mhNewConfig.minRequestsObserved = mhMinRequestsObserved;
 
     return std::make_shared<MarginalHitsStrategyNew>(mhNewConfig);
   } else if (rebalanceStrategy == "marginal-hits-old") {

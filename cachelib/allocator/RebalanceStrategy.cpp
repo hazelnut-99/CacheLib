@@ -64,7 +64,8 @@ void RebalanceStrategy::initPoolState(PoolId pid, const PoolStats& stats) {
              stats.cacheStats.at(id).containerStat.numWarmAccesses,
              stats.cacheStats.at(id).containerStat.numHotAccesses,
              stats.cacheStats.at(id).containerStat.numSecondLastTailAccesses,
-             0.0
+             0.0,
+             stats.numHitsForClass(id) + stats.cacheStats.at(id).allocAttempts
             };
   }
 }

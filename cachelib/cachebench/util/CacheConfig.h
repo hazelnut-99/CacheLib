@@ -143,6 +143,8 @@ struct CacheConfig : public JSONConfig {
   bool thresholdMI{false}; 
   bool thresholdAD{false}; 
   bool thresholdMD{false}; 
+
+  uint64_t mhMinRequestsObserved{50000};
   
 
 

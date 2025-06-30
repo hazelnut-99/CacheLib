@@ -50,6 +50,8 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
     bool thresholdAD{false};
     bool thresholdMD{true};
 
+    uint64_t minRequestsObserved{0};
+
     Config() noexcept {}
     explicit Config(double param) noexcept : Config(param, 1, 1) {}
     Config(double param, unsigned int minSlab, unsigned int maxFree) noexcept
@@ -70,7 +72,7 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
       return;
     }
     std::lock_guard<std::mutex> l(configLock_);
-    XLOGF(DBG, "Updating minDiff from {} to {}", config_.minDiff, newValue);
+    XLOGF(INFO, "Updating minDiff from {} to {}", config_.minDiff, newValue);
     config_.minDiff = newValue;
   }
 
@@ -95,6 +97,8 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
   ClassId pickVictimImpl(const CacheBase& cache,
                          PoolId pid,
                          const PoolStats& poolStats) override final;
+  
+  size_t computeNumRequests(PoolId pid, const PoolStats& poolStats) const;
 
  private:
   // compute delta of tail hits for every class in this pool

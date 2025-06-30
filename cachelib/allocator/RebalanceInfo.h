@@ -61,6 +61,8 @@ struct Info {
 
   double decayedAccuTailHits{0.0};
 
+  uint64_t numRequests{0}; // approximated with the number of allocation requests + number of hits
+
   // TODO(sugak) this is changed to unblock the LLVM upgrade The fix is not
   // completely understood, but it's a safe change T16521551 - Info() noexcept
   // = default;
@@ -74,8 +76,9 @@ struct Info {
        uint64_t wh,
        uint64_t hh,
        uint64_t slth,
-       double dath) noexcept
-      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh), accuSecondLastTailHits(slth),  decayedAccuTailHits{0.0}{}
+       double dath,
+       uint64_t nr) noexcept
+      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh), accuSecondLastTailHits(slth),  decayedAccuTailHits{0.0}, numRequests{0} {}
 
   // number of rounds we hold off for when we acquire a slab.
   static constexpr unsigned int kNumHoldOffRounds = 10;
@@ -118,6 +121,15 @@ struct Info {
     }
 
     return poolStats.numHitsForClass(id) - hits;
+  }
+
+
+  uint64_t deltaRequests(const PoolStats& poolStats) const {
+    const auto& cacheStats = poolStats.cacheStats.at(id);
+    auto totalRequests = poolStats.numHitsForClass(id) + cacheStats.allocAttempts;
+    return totalRequests > numRequests
+        ? totalRequests - numRequests
+        : 0;
   }
 
   // return the delta of alloc failures for this alloc class from the current
@@ -228,6 +240,11 @@ struct Info {
 
   void updateHits(const PoolStats& poolStats) noexcept {
     hits = poolStats.numHitsForClass(id);
+  }
+
+  void updateRequests(const PoolStats& poolStats) noexcept {
+    const auto& cacheStats = poolStats.cacheStats.at(id);
+    numRequests = poolStats.numHitsForClass(id) + cacheStats.allocAttempts;
   }
 
   void updateTailHits(const PoolStats& poolStats, double decayFactor=0.0) noexcept {
