@@ -63,6 +63,8 @@ struct Info {
 
   uint64_t numRequests{0}; // approximated with the number of allocation requests + number of hits
 
+  uint64_t numRequestsAtLastDecay{0}; // when the last decay happened
+
   // TODO(sugak) this is changed to unblock the LLVM upgrade The fix is not
   // completely understood, but it's a safe change T16521551 - Info() noexcept
   // = default;
@@ -77,8 +79,9 @@ struct Info {
        uint64_t hh,
        uint64_t slth,
        double dath,
-       uint64_t nr) noexcept
-      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh), accuSecondLastTailHits(slth),  decayedAccuTailHits{0.0}, numRequests{0} {}
+       uint64_t nr,
+       uint64_t nrld) noexcept
+      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh), accuSecondLastTailHits(slth),  decayedAccuTailHits{0.0}, numRequests{0}, numRequestsAtLastDecay{nrld} {}
 
   // number of rounds we hold off for when we acquire a slab.
   static constexpr unsigned int kNumHoldOffRounds = 10;
@@ -129,6 +132,14 @@ struct Info {
     auto totalRequests = poolStats.numHitsForClass(id) + cacheStats.allocAttempts;
     return totalRequests > numRequests
         ? totalRequests - numRequests
+        : 0;
+  }
+
+  uint64_t deltaRequestsSinceLastDecay(const PoolStats& poolStats) const {
+    const auto& cacheStats = poolStats.cacheStats.at(id);
+    auto totalRequests = poolStats.numHitsForClass(id) + cacheStats.allocAttempts;
+    return totalRequests > numRequestsAtLastDecay
+        ? totalRequests - numRequestsAtLastDecay
         : 0;
   }
 
@@ -252,6 +263,7 @@ struct Info {
     decayedAccuTailHits = (decayedAccuTailHits + getMarginalHits(poolStats, 1)) * decayFactor;
     accuTailHits = cacheStats.containerStat.numTailAccesses;
     accuSecondLastTailHits = cacheStats.containerStat.numSecondLastTailAccesses;
+    numRequestsAtLastDecay = poolStats.numHitsForClass(id) + cacheStats.allocAttempts;
   }
 
   // updates the current record to store the current state of slabs and the
