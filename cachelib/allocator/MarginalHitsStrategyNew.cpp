@@ -124,22 +124,22 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
     if(effectiveMoveRate <= config.emrLow && windowSize >= config.thresholdIncMinWindowSize) {
         if(config.thresholdAI) {
           auto currentMin = getMinDiffValueFromRebalanceEvents(pid);
-          if(updateMinDff(currentMin + 2)) {
+          if(updateMinDff(currentMin + config.thresholdAIADStep)) {
             clearPoolRebalanceEvent(pid);
           }
         } else if (config.thresholdMI){
-          if(updateMinDff(config.minDiff * 2)) {
+          if(updateMinDff(config.minDiff * config.thresholdMIMDFactor)) {
             clearPoolRebalanceEvent(pid);
           }
         }
         
     } else if (effectiveMoveRate >= config.emrHigh && windowSize >= classWithHits) {
         if(config.thresholdAD) {
-          if(updateMinDff(std::max(2.0, config.minDiff - 2))) {
+          if(updateMinDff(std::max(2.0, config.minDiff - config.thresholdAIADStep))) {
             clearPoolRebalanceEvent(pid);
           }
         } else if (config.thresholdMD){
-          if(updateMinDff(std::max(2.0, config.minDiff / 2))) {
+          if(updateMinDff(std::max(2.0, config.minDiff / config.thresholdMIMDFactor))) {
             clearPoolRebalanceEvent(pid);
           }
         }

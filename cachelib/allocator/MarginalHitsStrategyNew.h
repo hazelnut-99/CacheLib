@@ -52,6 +52,8 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
 
     double emrLow{0.5};
     double emrHigh{0.95};
+    double thresholdAIADStep{2.0};
+    double thresholdMIMDFactor{2.0};
 
     uint64_t minRequestsObserved{0};
 
