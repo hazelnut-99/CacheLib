@@ -27,6 +27,7 @@
 #include <optional>
 
 #include "cachelib/common/ThreadCpuCycleCounter.h"
+#include "cachelib/common/PinCpuCore.h"
 
 namespace facebook {
 namespace cachelib {

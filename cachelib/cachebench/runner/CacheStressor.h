@@ -46,6 +46,7 @@
 #include "cachelib/common/DistributionAnomalyDetector.h"
 #include "cachelib/common/EWMA.h"
 #include "cachelib/common/ThreadCpuCycleCounter.h"
+#include "cachelib/common/PinCpuCore.h"
 
 typedef void (*set_mock_time_t)(time_t, long);
 
@@ -200,6 +201,12 @@ class CacheStressor : public Stressor {
             std::thread([this, throughputStats = &throughputStats_.at(i),
                         threadName = folly::sformat("cb_stressor_{}", i), i]() {
               folly::setThreadName(threadName);
+              
+              std::vector<int> coreIds;
+              for (int cid = 0; cid <= 9; ++cid) {
+                  coreIds.push_back(cid);
+              }
+              facebook::cachelib::pinThreadToCores(coreIds);
               stressByDiscreteDistribution(*throughputStats, i);
             }));
       }
@@ -354,8 +361,8 @@ class CacheStressor : public Stressor {
     std::optional<uint64_t> lastRequestTs = std::nullopt;
     updateRebalanceInterval(0, rebalanceIntervalInUse_, "init");
     
-    // facebook::cachelib::ThreadCpuCycleCounter cycleCounter;
-    // uint64_t cyclesBefore = cycleCounter.read();
+    facebook::cachelib::ThreadCpuCycleCounter cycleCounter;
+    uint64_t cyclesBefore = cycleCounter.read();
 
     for (uint64_t i = 0;
          i < config_.numOps &&
@@ -683,10 +690,10 @@ class CacheStressor : public Stressor {
       }
     }
 
-    // uint64_t cyclesAfter = cycleCounter.read();
-    // uint64_t cyclesDelta = cyclesAfter - cyclesBefore;
-    // std::cout << "CPU cycles for serving requests: " << cyclesDelta << std::endl;
-    // cycleCounter.stop(); 
+    uint64_t cyclesAfter = cycleCounter.read();
+    uint64_t cyclesDelta = cyclesAfter - cyclesBefore;
+    std::cout << "CPU cycles for serving requests: " << cyclesDelta << std::endl;
+    cycleCounter.stop(); 
     wg_->markFinish();
   }
 

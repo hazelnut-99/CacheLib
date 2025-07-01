@@ -30,6 +30,7 @@
 #include "cachelib/cachebench/workload/ReplayGeneratorBase.h"
 #include "cachelib/cachebench/workload/ZstdReader.h"
 #include "cachelib/allocator/memory/Slab.h"
+#include "cachelib/common/PinCpuCore.h"
 
 namespace facebook {
 namespace cachelib {
@@ -100,6 +101,11 @@ class OGBinaryReplayGenerator : public ReplayGeneratorBase {
 
     genWorker_ = std::thread([this] {
       folly::setThreadName("cb_replay_gen");
+      std::vector<int> coreIds;
+      for (int cid = 20; cid <= 29; ++cid) {
+          coreIds.push_back(cid);
+      }
+      facebook::cachelib::pinThreadToCores(coreIds);
       genRequests();
     });
 

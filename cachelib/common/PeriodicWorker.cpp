@@ -50,9 +50,23 @@ void PeriodicWorker::loop(void) {
   LockHolder l(lock_);
   preWork();
 
+  uint64_t cycleSum = 0;
   while (!shouldStopWork_) {
     l.unlock();
+
+    uint64_t before = 0, after = 0, delta = 0;
+    if (cycleCounter_) {
+      before = cycleCounter_->read();
+    }
+
     work();
+
+    if (cycleCounter_) {
+      after = cycleCounter_->read();
+      delta = after - before;
+      cycleSum += delta;
+    }
+
     const std::chrono::milliseconds timeoutMs(interval_);
     runCount_.fetch_add(1, std::memory_order_relaxed);
     l.lock();
@@ -65,6 +79,11 @@ void PeriodicWorker::loop(void) {
    * happening, and waits for this field to flip. */
   shouldStopWork_ = false;
   l.unlock();
+
+  if (cycleCounter_) {
+      std::cout << "[PeriodicWorker] Thread name: " << threadName_
+                << ", Total CPU cycles in work(): " << cycleSum << std::endl;
+  }
 
   cond_.notify_one();
   return;
@@ -83,16 +102,22 @@ bool PeriodicWorker::start(const std::chrono::milliseconds sleepInterval,
     return true;
   }
 
-  auto runLoop = [this]() { loop(); };
+  // Prepare core IDs outside the thread
+  std::vector<int> coreIds;
+  for (int cid = 0; cid <= 9; ++cid) {
+      coreIds.push_back(cid);
+  }
+  auto nameStr = thread_name.str();
+
+  auto runLoop = [this, coreIds, nameStr]() {
+    folly::setThreadName(nameStr);
+    facebook::cachelib::pinThreadToCores(coreIds);
+    cycleCounter_.emplace();
+    loop();
+  };
   workerThread_ = std::make_unique<std::thread>(std::move(runLoop));
 
-  /*
-   * Set the name of the thread
-   */
-  folly::setThreadName(workerThread_->native_handle(), thread_name);
-  // threadName_ = thread_name.str();
-  // cycleCounter_.emplace();
-  // cycleCounterStart_ = cycleCounter_->read();
+  threadName_ = nameStr;
 
   return true;
 }
@@ -145,16 +170,6 @@ bool PeriodicWorker::stop(const std::chrono::milliseconds timeout) {
     if (tmp->joinable()) {
       tmp->join();
     }
-
-    // if (cycleCounter_) {
-    //   uint64_t after = cycleCounter_->read();
-    //   uint64_t delta = after - cycleCounterStart_;
-    //   std::cout << "[PeriodicWorker] Thread (name: "
-    //             << (threadName_.empty() ? "unnamed" : threadName_)
-    //             << ") CPU cycles: " << delta << std::endl;
-    //   cycleCounter_->stop();
-    //   cycleCounter_.reset();
-    // }
   }
   return true;
 }
