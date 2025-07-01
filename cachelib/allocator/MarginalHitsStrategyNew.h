@@ -77,7 +77,7 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
       return false;
     }
     std::lock_guard<std::mutex> l(configLock_);
-    XLOGF(DBG, "Updating minDiff from {} to {}", config_.minDiff, newValue);
+    XLOGF(INFO, "Updating minDiff from {} to {}", config_.minDiff, newValue);
     config_.minDiff = newValue;
     return true;
   }
