@@ -145,8 +145,12 @@ struct CacheConfig : public JSONConfig {
   bool thresholdMD{false}; 
 
   uint64_t minRequestsObserved{0};
+  uint64_t maxDecayInterval{0};
   double emrLow{0.5};
   double emrHigh{0.95};
+
+  double thresholdAIADStep{2.0};
+  double thresholdMIMDFactor{2.0};
   
 
 

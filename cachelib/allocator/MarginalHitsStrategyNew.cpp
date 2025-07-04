@@ -96,11 +96,17 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
     ctx = kNoOpContext;
   }
   auto& poolState = getPoolState(pid);
-  if((ctx.isEffective() || !config.onlyUpdateHitIfRebalance) && numRequestObserved >= config.minRequestsObserved) {  
+  auto deltaRequestsSinceLastDecay = computeRequestsSinceLastDecay(pid, poolStats);
+  if((ctx.isEffective() || !config.onlyUpdateHitIfRebalance) || deltaRequestsSinceLastDecay >= config.maxDecayInterval) {  
     for (const auto i : poolStats.getClassIds()) {
         poolState[i].updateTailHits(poolStats, config.movingAverageParam);
-        poolState[i].updateRequests(poolStats);
-      }
+    }
+  }
+
+  if(numRequestObserved >= config.minRequestsObserved) {
+    for (const auto i : poolStats.getClassIds()) {
+      poolState[i].updateRequests(poolStats);
+    }
   }
 
   // self-tuning threshold for the next round.
@@ -124,22 +130,22 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
     if(effectiveMoveRate <= config.emrLow && windowSize >= config.thresholdIncMinWindowSize) {
         if(config.thresholdAI) {
           auto currentMin = getMinDiffValueFromRebalanceEvents(pid);
-          if(updateMinDff(currentMin + 2)) {
+          if(updateMinDff(currentMin + config.thresholdAIADStep)) {
             clearPoolRebalanceEvent(pid);
           }
         } else if (config.thresholdMI){
-          if(updateMinDff(config.minDiff * 2)) {
+          if(updateMinDff(config.minDiff * config.thresholdMIMDFactor)) {
             clearPoolRebalanceEvent(pid);
           }
         }
         
     } else if (effectiveMoveRate >= config.emrHigh && windowSize >= classWithHits) {
         if(config.thresholdAD) {
-          if(updateMinDff(std::max(2.0, config.minDiff - 2))) {
+          if(updateMinDff(std::max(2.0, config.minDiff - config.thresholdAIADStep))) {
             clearPoolRebalanceEvent(pid);
           }
         } else if (config.thresholdMD){
-          if(updateMinDff(std::max(2.0, config.minDiff / 2))) {
+          if(updateMinDff(std::max(2.0, config.minDiff / config.thresholdMIMDFactor))) {
             clearPoolRebalanceEvent(pid);
           }
         }
@@ -177,6 +183,17 @@ size_t MarginalHitsStrategyNew::computeNumRequests(
   auto classesSet = poolStats.getClassIds();
   for (const auto& cid : classesSet) {
     totalRequests += poolState.at(cid).deltaRequests(poolStats);
+  }
+  return totalRequests;
+}
+
+size_t MarginalHitsStrategyNew::computeRequestsSinceLastDecay(
+    PoolId pid, const PoolStats& poolStats) const {
+  const auto& poolState = getPoolState(pid);
+  size_t totalRequests = 0;
+  auto classesSet = poolStats.getClassIds();
+  for (const auto& cid : classesSet) {
+    totalRequests += poolState.at(cid).deltaRequestsSinceLastDecay(poolStats);
   }
   return totalRequests;
 }

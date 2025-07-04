@@ -52,8 +52,11 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
 
     double emrLow{0.5};
     double emrHigh{0.95};
+    double thresholdAIADStep{2.0};
+    double thresholdMIMDFactor{2.0};
 
-    uint64_t minRequestsObserved{0};
+    uint64_t minRequestsObserved{50000};
+    uint64_t maxDecayInterval{0};
 
     Config() noexcept {}
     explicit Config(double param) noexcept : Config(param, 1, 1) {}
@@ -103,6 +106,8 @@ class MarginalHitsStrategyNew : public RebalanceStrategy {
                          const PoolStats& poolStats) override final;
   
   size_t computeNumRequests(PoolId pid, const PoolStats& poolStats) const;
+
+  size_t computeRequestsSinceLastDecay(PoolId pid, const PoolStats& poolStats) const;
 
  private:
   // compute delta of tail hits for every class in this pool

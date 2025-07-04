@@ -88,6 +88,12 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, thresholdMI);
   JSONSetVal(configJson, thresholdAD);
   JSONSetVal(configJson, thresholdMD);
+  JSONSetVal(configJson, emrLow);
+  JSONSetVal(configJson, emrHigh);
+  JSONSetVal(configJson, thresholdAIADStep);
+  JSONSetVal(configJson, thresholdMIMDFactor);
+  JSONSetVal(configJson, minRequestsObserved);
+  JSONSetVal(configJson, maxDecayInterval);
 
 
 
@@ -174,7 +180,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   // if you added new fields to the configuration, update the JSONSetVal
   // to make them available for the json configs and increment the size
   // below
-  checkCorrectSize<CacheConfig, 1040>();
+  checkCorrectSize<CacheConfig, 1064>();
 
   if (numPools != poolSizes.size()) {
     throw std::invalid_argument(folly::sformat(
@@ -263,7 +269,12 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     mhNewConfig.thresholdAD = thresholdAD;
     mhNewConfig.thresholdMI = thresholdMI;
     mhNewConfig.thresholdMD = thresholdMD;
+    mhNewConfig.emrLow = emrLow;
+    mhNewConfig.emrHigh = emrHigh;
+    mhNewConfig.thresholdAIADStep = thresholdAIADStep;
+    mhNewConfig.thresholdMIMDFactor = thresholdMIMDFactor;
     mhNewConfig.minRequestsObserved = minRequestsObserved;
+    mhNewConfig.maxDecayInterval = maxDecayInterval;
 
     return std::make_shared<MarginalHitsStrategyNew>(mhNewConfig);
   } else if (rebalanceStrategy == "marginal-hits-old") {
