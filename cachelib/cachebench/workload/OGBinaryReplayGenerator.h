@@ -251,27 +251,12 @@ inline bool OGBinaryReplayGenerator::parseRequest(
     req->req_.timestamp = timestampSeconds;
   }
 
-  size_t chunkSize = 1 * 1024 * 1024; // 1 MB
   size_t objSize = sizeField.value();
 
-  if (objSize > chunkSize) {
-    size_t numChunks = (objSize + chunkSize - 1) / chunkSize; 
-    req->sizes_.clear(); 
-    req->sizes_.reserve(numChunks); 
-
-    for (size_t i = 0; i < numChunks; ++i) {
-      size_t currentChunkSize = (i == numChunks - 1)
-                                ? (objSize % chunkSize == 0 ? chunkSize : objSize % chunkSize)
-                                : chunkSize;
-      req->sizes_.push_back(currentChunkSize);
-    }
-    req->req_.setOp(OpType::kAddChained);
-  } else {
-    req->sizes_.clear(); 
-    req->sizes_.resize(1); 
-    req->sizes_[0] = objSize;
-    req->req_.setOp(OpType::kGet);
-  }
+  req->sizes_.clear(); 
+  req->sizes_.resize(1); 
+  req->sizes_[0] = objSize;
+  req->req_.setOp(OpType::kGet);
   req->req_.sizeBegin = req->sizes_.begin();
   req->req_.sizeEnd = req->sizes_.end();
 
@@ -314,7 +299,6 @@ inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternal() {
 
 inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternalZstd() {
   auto reqWrapper = std::make_unique<OGReqWrapper>();
-  size_t chunkSize = 1 * 1024 * 1024; // 1 MB
 
   do {
     OracleGeneralBinRequest req;
@@ -328,24 +312,10 @@ inline std::unique_ptr<OGReqWrapper> OGBinaryReplayGenerator::getReqInternalZstd
       return getReqInternalZstd();
     }
 
-    if (req.objSize > chunkSize) {
-      size_t numChunks = (req.objSize + chunkSize - 1) / chunkSize; 
-      reqWrapper->sizes_.clear(); 
-      reqWrapper->sizes_.reserve(numChunks); 
-      for (size_t i = 0; i < numChunks; ++i) {
-        size_t currentChunkSize = (i == numChunks - 1) 
-                                  ? (req.objSize % chunkSize == 0 ? chunkSize : req.objSize % chunkSize)
-                                  : chunkSize;
-        reqWrapper->sizes_.push_back(currentChunkSize);
-      }
-
-      reqWrapper->req_.setOp(OpType::kAddChained);
-    } else {
-      reqWrapper->sizes_.clear(); 
-      reqWrapper->sizes_.resize(1); 
-      reqWrapper->sizes_[0] = req.objSize; 
-      reqWrapper->req_.setOp(OpType::kGet);
-    }
+    reqWrapper->sizes_.clear(); 
+    reqWrapper->sizes_.resize(1); 
+    reqWrapper->sizes_[0] = req.objSize; 
+    reqWrapper->req_.setOp(OpType::kGet);
 
     reqWrapper->req_.sizeBegin = reqWrapper->sizes_.begin();
     reqWrapper->req_.sizeEnd = reqWrapper->sizes_.end();
