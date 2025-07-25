@@ -123,9 +123,9 @@ RebalanceContext MarginalHitsStrategyNew::pickVictimAndReceiverCandidates(
     auto effectiveMoveRate = queryEffectiveMoveRate(pid);
     auto windowSize = getRebalanceEventQueueSize(pid);
     XLOGF(DBG, 
-          "Rebalancing: effective move rate = {}, window size = {}, diff = {}, ({}->{})",
+          "Rebalancing: effective move rate = {}, window size = {}, diff = {}, threshold = {}, ({}->{})",
           effectiveMoveRate,
-          windowSize, ctx.diffValue, static_cast<int>(ctx.victimClassId), static_cast<int>(ctx.receiverClassId));
+          windowSize, ctx.diffValue, config.minDiff, static_cast<int>(ctx.victimClassId), static_cast<int>(ctx.receiverClassId));
   
     if(effectiveMoveRate <= config.emrLow && windowSize >= config.thresholdIncMinWindowSize) {
         if(config.thresholdAI) {
