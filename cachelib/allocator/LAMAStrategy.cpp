@@ -79,12 +79,12 @@ RebalanceContext LAMAStrategy::pickVictimAndReceiverImpl(
   auto [mrImprovement, victimReceiverPairs] = pickVictimReceiverPairs(cache, pid, poolStats);
 
   if (mrImprovement < config.missRatioImprovementThreshold) {
-    XLOGF(INFO, "MR improvement {} is below threshold {}. No rebalancing.",
+    XLOGF(DBG, "MR improvement {} is below threshold {}. No rebalancing.",
           mrImprovement, config.missRatioImprovementThreshold);
     return kNoOpContext;
   }
   if (victimReceiverPairs.empty()) {
-    XLOGF(INFO, "No victim-receiver pairs found for pool {}. No rebalancing.",
+    XLOGF(DBG, "No victim-receiver pairs found for pool {}. No rebalancing.",
           static_cast<int>(pid));
     return kNoOpContext;
   }
@@ -95,7 +95,7 @@ RebalanceContext LAMAStrategy::pickVictimAndReceiverImpl(
       victimReceiverPairs.begin(), victimReceiverPairs.begin() + numToMove);
       
     for (const auto& [victim, receiver] : selectedPairs) {
-        XLOGF(INFO, "Selected victim-receiver pair: victim={}, receiver={}",
+        XLOGF(DBG, "Selected victim-receiver pair: victim={}, receiver={}",
             static_cast<int>(victim), static_cast<int>(receiver));
     }
   RebalanceContext ctx;
@@ -154,17 +154,17 @@ std::tuple<double, std::vector<std::pair<ClassId, ClassId>>> LAMAStrategy::pickV
      * - accessFrequencies (std::map<ClassId, size_t>): A map mapping ClassId to the total number of
      * requests for that class in the current window.
      */
-    std::tuple<double, double, std::map<ClassId, size_t>, std::vector<std::pair<ClassId, ClassId>>, std::map<ClassId, size_t>>
+    std::tuple<double, double, std::unordered_map<ClassId, size_t>, std::vector<std::pair<ClassId, ClassId>>, std::unordered_map<ClassId, size_t>>
         result = mrc->solveSlabReallocation(classIdToAllocsPerSlabMap, currentSlabAllocation);
     
     double mrOld, mrNew;
-    std::map<ClassId, size_t> optimalAllocation;
+    std::unordered_map<ClassId, size_t> optimalAllocation;
     std::vector<std::pair<ClassId, ClassId>> reassignmentPlan;
-    std::map<ClassId, size_t> accessFrequencies;
+    std::unordered_map<ClassId, size_t> accessFrequencies;
 
     std::tie(mrOld, mrNew, optimalAllocation, reassignmentPlan, accessFrequencies) = result;
     double mrImprovement = mrOld - mrNew;
-    XLOGF(INFO, "MRC Reallocation: Old MR: {}, New MR: {}, Improvement: {}", mrOld, mrNew, mrImprovement);
+    XLOGF(DBG, "MRC Reallocation: Old MR: {}, New MR: {}, Improvement: {}", mrOld, mrNew, mrImprovement);
 
     return {mrImprovement, reassignmentPlan};
 }
