@@ -43,6 +43,7 @@ add_library (cachelib_allocator
     MarginalHitsStrategyNew.cpp
     MarginalHitsStrategyOld.cpp
     HitsPerTailSlabStrategy.cpp
+    EvictionRateStrategy.cpp
     LAMAStrategy.cpp
     memory/AllocationClass.cpp
     memory/MemoryAllocator.cpp

@@ -682,7 +682,7 @@ Cache<Allocator>::Cache(const CacheConfig& config,
   // for now do this for every one
   //allocatorConfig_.enableTailHitsTracking();
   if (config_.rebalanceStrategy == "marginal-hits" ||
-      config_.rebalanceStrategy == "marginal-hits-new" || config_.rebalanceStrategy == "marginal-hits-old") {
+      config_.rebalanceStrategy == "marginal-hits-new" || config_.rebalanceStrategy == "marginal-hits-old" || config_.enableTailHitsTracking) {
         allocatorConfig_.enableTailHitsTracking();
   }
   if (config_.rebalanceStrategy == "lama") {

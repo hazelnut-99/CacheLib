@@ -128,6 +128,7 @@ struct CacheConfig : public JSONConfig {
 
   bool mhEnableHoldOff{false};
   bool countColdTailHitsOnly{false};
+  bool enableTailHitsTracking{false};
   unsigned int tailSlabCnt{1};
   bool enableShardsMrc{false};
   bool mhFilterReceiverByEvictionRate{false};

@@ -65,6 +65,8 @@ struct Info {
 
   uint64_t numRequestsAtLastDecay{0}; // when the last decay happened
 
+  uint64_t numAllocations{0};
+
   // TODO(sugak) this is changed to unblock the LLVM upgrade The fix is not
   // completely understood, but it's a safe change T16521551 - Info() noexcept
   // = default;
@@ -80,8 +82,9 @@ struct Info {
        uint64_t slth,
        double dath,
        uint64_t nr,
-       uint64_t nrld) noexcept
-      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh), accuSecondLastTailHits(slth),  decayedAccuTailHits{0.0}, numRequests{0}, numRequestsAtLastDecay{nrld} {}
+       uint64_t nrld,
+       uint64_t na) noexcept
+      : id(_id), nSlabs(slabs), evictions(evicts), hits(h), accuTailHits(th), accuColdHits(ch), accuWarmHits(wh), accuHotHits(hh), accuSecondLastTailHits(slth),  decayedAccuTailHits{0.0}, numRequests{0}, numRequestsAtLastDecay{nrld}, numAllocations{na} {}
 
   // number of rounds we hold off for when we acquire a slab.
   static constexpr unsigned int kNumHoldOffRounds = 10;
@@ -107,6 +110,13 @@ struct Info {
     XDCHECK(cacheStats.find(id) != cacheStats.end());
     return static_cast<int64_t>(cacheStats.at(id).numEvictions()) -
            static_cast<int64_t>(evictions);
+  }
+
+  int64_t getDeltaAllocations(const PoolStats& poolStats) const {
+    const auto& cacheStats = poolStats.cacheStats;
+    XDCHECK(cacheStats.find(id) != cacheStats.end());
+    return static_cast<int64_t>(cacheStats.at(id).allocAttempts) -
+           static_cast<int64_t>(numAllocations);
   }
 
   // return the delta of hits for this alloc class from the current state.
@@ -251,6 +261,11 @@ struct Info {
 
   void updateHits(const PoolStats& poolStats) noexcept {
     hits = poolStats.numHitsForClass(id);
+  }
+
+  void updateAllocations(const PoolStats& poolStats) noexcept {
+    const auto& cacheStats = poolStats.cacheStats.at(id);
+    numAllocations = cacheStats.allocAttempts;
   }
 
   void updateRequests(const PoolStats& poolStats) noexcept {

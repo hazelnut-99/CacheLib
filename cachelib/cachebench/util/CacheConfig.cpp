@@ -26,6 +26,7 @@
 #include "cachelib/allocator/MarginalHitsStrategy.h"
 #include "cachelib/allocator/RandomStrategy.h"
 #include "cachelib/allocator/RandomStrategyNew.h"
+#include "cachelib/allocator/EvictionRateStrategy.h"
 
 namespace facebook {
 namespace cachelib {
@@ -74,6 +75,7 @@ CacheConfig::CacheConfig(const folly::dynamic& configJson) {
   JSONSetVal(configJson, mhMinDiff);
   JSONSetVal(configJson, mhMinDiffRatio);
   JSONSetVal(configJson, countColdTailHitsOnly);
+  JSONSetVal(configJson, enableTailHitsTracking);
   JSONSetVal(configJson, tailSlabCnt);
   JSONSetVal(configJson, enableShardsMrc);
   JSONSetVal(configJson, mhFilterReceiverByEvictionRate);
@@ -212,6 +214,16 @@ std::shared_ptr<RebalanceStrategy> CacheConfig::getRebalanceStrategy() const {
     hpsConfig.minLruTailAge = hpsMinLruTailAge;
     hpsConfig.maxLruTailAge = hpsMaxLruTailAge;
     return std::make_shared<HitsPerSlabStrategy>(hpsConfig);
+  } else if (rebalanceStrategy == "eviction-rate") {
+    // reuse config values for hits-per-slab
+    EvictionRateStrategy::Config ersConfig;
+    ersConfig.minDiff = hpsMinDiff;
+    ersConfig.diffRatio = rebalanceDiffRatio;
+    ersConfig.minSlabs = rebalanceMinSlabs;
+    ersConfig.numSlabsFreeMem = hpsNumSlabsFreeMem;
+    ersConfig.minLruTailAge = hpsMinLruTailAge;
+    ersConfig.maxLruTailAge = hpsMaxLruTailAge;
+    return std::make_shared<EvictionRateStrategy>(ersConfig);
   } else if (rebalanceStrategy == "hits-per-tail-slab") {
     HitsPerTailSlabStrategy::Config hptsConfig;
     hptsConfig.minDiff = hpsMinDiff;
