@@ -104,7 +104,8 @@ bool PeriodicWorker::start(const std::chrono::milliseconds sleepInterval,
 
   // Prepare core IDs outside the thread
   std::vector<int> coreIds;
-  for (int cid = 0; cid <= 9; ++cid) {
+  // first half of numa 0
+  for (int cid = 0; cid <= 26; cid+=2) {
       coreIds.push_back(cid);
   }
   auto nameStr = thread_name.str();

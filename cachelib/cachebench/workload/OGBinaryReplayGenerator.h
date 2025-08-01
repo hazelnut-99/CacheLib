@@ -102,7 +102,7 @@ class OGBinaryReplayGenerator : public ReplayGeneratorBase {
     genWorker_ = std::thread([this] {
       folly::setThreadName("cb_replay_gen");
       std::vector<int> coreIds;
-      for (int cid = 20; cid <= 29; ++cid) {
+      for (int cid = 28; cid <= 54; cid+=2) {
           coreIds.push_back(cid);
       }
       facebook::cachelib::pinThreadToCores(coreIds);
@@ -155,7 +155,7 @@ class OGBinaryReplayGenerator : public ReplayGeneratorBase {
   // We use polling with the delay since the ProducerConsumerQueue does not
   // support blocking read or writes with a timeout
   static constexpr uint64_t checkIntervalUs_ = 100;
-  static constexpr size_t kMaxRequests = 10000;
+  static constexpr size_t kMaxRequests = 400000000;
   static constexpr size_t kMinKeySize = 16;
   static constexpr size_t maxSlabSize = 1ULL << facebook::cachelib::Slab::kNumSlabBits;
 
@@ -428,6 +428,7 @@ const Request& OGBinaryReplayGenerator::getReq(uint8_t,
       throw cachelib::cachebench::EndOfTrace("Test stopped or EOF reached");
     }
     // ProducerConsumerQueue does not support blocking, so use sleep
+    XLOGF(INFO, "Waiting for request to be available in the queue");
     std::this_thread::sleep_for(std::chrono::microseconds{checkIntervalUs_});
   }
 

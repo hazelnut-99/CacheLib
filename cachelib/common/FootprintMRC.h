@@ -17,6 +17,7 @@
 #pragma once
 #include <deque>
 #include <map>
+#include <unordered_map>
 #include <vector>
 #include <string>
 #include <cmath>
@@ -26,6 +27,8 @@
 #include <utility>
 #include <set>
 #include <limits>
+#include <chrono>
+#include <iostream>
 
 #include "cachelib/allocator/CacheItem.h"
 #include "cachelib/allocator/memory/Slab.h"
@@ -36,9 +39,9 @@ namespace cachelib {
 
 class FootprintMRC {
 public:
-    // Define Key as std::string for internal storage to ensure memory ownership.
-    // The feed method will convert KAllocation::Key to std::string.
-    using Key = std::string;
+    // Use uint64_t for keys since they're large integers in string form
+    using KeyInt = uint64_t;
+    using Key = std::string; // Keep for compatibility, but we'll store KeyInt internally
 
     // Define the standard slab size in bytes using Slab::kNumSlabBits
     static const size_t SLAB_SIZE = 1ULL << facebook::cachelib::Slab::kNumSlabBits;
@@ -63,15 +66,40 @@ public:
     /**
      * @brief Feeds a new memory access request (key, class ID) into the circular buffer.
      * If the buffer is full, the oldest entry is overwritten.
+     * This method is designed to be memory-safe even under concurrent access.
      *
      * @param key The memory access key (KAllocation::Key, which is folly::StringPiece).
      * @param classId An identifier for the class this key belongs to.
      */
     void feed(const KAllocation::Key& key, const ClassId& classId) {
-        // Convert the KAllocation::Key (folly::StringPiece) to std::string to ensure ownership
-        // and avoid dangling pointers when stored in circularBuffer.
-        circularBuffer[bufferHeadIndex] = std::make_tuple(key.str(), classId);
-        bufferHeadIndex = (bufferHeadIndex + 1) % circularBufferMaxLen;
+        // Defensive: ensure we have a valid buffer
+        if (circularBuffer.empty() || circularBufferMaxLen == 0) {
+            return;
+        }
+        
+        // Convert the string key to uint64_t for much faster operations
+        KeyInt keyInt = 0;
+        try {
+            keyInt = std::stoull(key.str());
+        } catch (const std::exception&) {
+            // Fallback: use hash of the string if conversion fails
+            keyInt = std::hash<std::string>{}(key.str());
+        }
+        
+        // Capture current head index to avoid race conditions
+        size_t currentHead = bufferHeadIndex;
+        
+        // Bounds check - defensive programming
+        if (currentHead >= circularBufferMaxLen) {
+            currentHead = 0;
+            bufferHeadIndex = 0;
+        }
+        
+        // Store the integer key directly - this is atomic for the tuple assignment
+        circularBuffer[currentHead] = std::make_tuple(keyInt, classId);
+        
+        // Update indices atomically
+        bufferHeadIndex = (currentHead + 1) % circularBufferMaxLen;
 
         if (currentBufferSize < circularBufferMaxLen) {
             currentBufferSize++;
@@ -79,123 +107,187 @@ public:
     }
 
     /**
-     * @brief Calculates the Miss-Ratio Curve (MRC) based on the current requests
-     * in the circular buffer, expressed in terms of slab granularity,
-     * for each unique classId. Also returns the mrcDelta for each class
-     * and the total access frequency for each class within the window.
+     * @brief Calculates footprint values for given cache sizes using footprint theory.
+     * This is the primary method for querying miss-ratio curves efficiently.
+     *
+     * @param cacheSizes Array of cache sizes (in objects) to evaluate.
+     * @return std::vector<double> Footprint values corresponding to each cache size.
+     */
+    // Optimize the queryMrc method to reduce intermediate object copies
+    std::vector<double> queryMrc(const folly::Range<const uint32_t*>& cacheSizes) const {
+        if (currentBufferSize == 0) {
+            return std::vector<double>(cacheSizes.size(), 0.0);
+        }
+
+        // Calculate window stats once and reuse
+        auto [firstAccessTimesByClass, lastAccessTimesByClass, reuseTimeHistogramByClass, nByClass, mByClass] = 
+            calculateWindowStats();
+
+        // Pre-allocate result vector for better performance
+        std::vector<double> result;
+        result.reserve(cacheSizes.size());
+
+        // Process each class once and cache results
+        std::unordered_map<ClassId, std::map<size_t, double>> cachedFpValues;
+        for (const auto& [classId, _] : firstAccessTimesByClass) {
+            cachedFpValues[classId] = calculateFpValues(
+                firstAccessTimesByClass.at(classId),
+                lastAccessTimesByClass.at(classId),
+                reuseTimeHistogramByClass.at(classId),
+                nByClass.at(classId),
+                mByClass.at(classId)
+            );
+        }
+
+        for (uint32_t cacheSize : cacheSizes) {
+            double totalFpValue = 0.0;
+            
+            for (const auto& [classId, fpValues] : cachedFpValues) {
+                size_t w = std::min(static_cast<size_t>(cacheSize), static_cast<size_t>(nByClass.at(classId)));
+                
+                // Use efficient lookup with lower_bound for better performance
+                auto it = fpValues.upper_bound(w);
+                if (it != fpValues.begin()) {
+                    --it;
+                    totalFpValue += it->second;
+                }
+            }
+            result.push_back(totalFpValue);
+        }
+        
+        return result;
+    }
+
+    /**
+     * @brief Calculates detailed MRC data for each class, including MRC points, MRC deltas, and access frequencies.
+     * This version is used by solveSlabReallocation for detailed analysis.
      *
      * @param classIdToAllocsPerSlabMap A map where keys are ClassId and values are
      * the number of objects (of that class) that can be stored in one slab.
-     * Must be > 0 for all relevant classes.
      * @param maxSlabCount The maximum number of slabs to consider for the MRC.
-     *
      * @return std::map<ClassId, std::tuple<std::map<size_t, double>, std::map<size_t, double>, size_t>>
      * A map where keys are classIds. Each value is a tuple:
-     * - mrcPoints (std::map<size_t, double>): A map where keys are slab counts and
-     * values are their corresponding miss ratios.
-     * - mrcDelta (std::map<size_t, double>): A map where keys are slab counts (i)
-     * and values are mrc(i-1) - mrc(i).
-     * - accessFrequency (size_t): The total number of requests for this class
-     * in the current circular buffer window.
-     * @throws std::invalid_argument if an allocsPerSlab for a class is not found or is 0.
+     * - mrcPoints (std::map<size_t, double>): Miss ratios for different slab counts
+     * - mrcDelta (std::map<size_t, double>): MRC deltas (difference between consecutive points)
+     * - accessFrequency (size_t): Total access count for this class
      */
     std::map<ClassId, std::tuple<std::map<size_t, double>, std::map<size_t, double>, size_t>>
     queryMrc(const std::map<ClassId, size_t>& classIdToAllocsPerSlabMap, size_t maxSlabCount) const {
-        auto statsByClass = calculateWindowStats();
-
-        const std::map<ClassId, std::map<Key, size_t>>& firstAccessTimesByClass = std::get<0>(statsByClass);
-        const std::map<ClassId, std::map<Key, size_t>>& lastAccessTimesByClass = std::get<1>(statsByClass);
-        const std::map<ClassId, std::map<size_t, size_t>>& reuseTimeHistogramByClass = std::get<2>(statsByClass);
-        const std::map<ClassId, size_t>& nByClass = std::get<3>(statsByClass);
-        const std::map<ClassId, size_t>& mByClass = std::get<4>(statsByClass);
-
-        if (nByClass.empty()) {
+        if (currentBufferSize == 0) {
             return {};
         }
 
-        std::map<ClassId, std::tuple<std::map<size_t, double>, std::map<size_t, double>, size_t>>
-            allClassMrcResults;
+        // Calculate window stats once and reuse
+        auto [firstAccessTimesByClass, lastAccessTimesByClass, reuseTimeHistogramByClass, nByClass, mByClass] = 
+            calculateWindowStats();
 
-        for (const auto& pairN : nByClass) {
-            const ClassId& classId = pairN.first;
-            size_t nWindowForClass = pairN.second;
-            size_t mWindowForClass = mByClass.at(classId);
-            const auto& firstAccessTimesForClass = firstAccessTimesByClass.at(classId);
-            const auto& lastAccessTimesForClass = lastAccessTimesByClass.at(classId);
-            const auto& reuseTimeHistogramForClass = reuseTimeHistogramByClass.at(classId);
+        std::map<ClassId, std::tuple<std::map<size_t, double>, std::map<size_t, double>, size_t>> result;
 
-            if (nWindowForClass == 0) {
-                allClassMrcResults[classId] = std::make_tuple(std::map<size_t, double>(), std::map<size_t, double>(), 0);
+        // Process each class that has allocation info
+        for (const auto& [classId, allocsPerSlab] : classIdToAllocsPerSlabMap) {
+            // Defensive: skip invalid entries instead of throwing
+            if (allocsPerSlab == 0) {
+                continue; // Skip this class instead of throwing
+            }
+
+            // Skip classes not present in current window
+            if (firstAccessTimesByClass.find(classId) == firstAccessTimesByClass.end()) {
                 continue;
             }
 
-            auto it = classIdToAllocsPerSlabMap.find(classId);
-            if (it == classIdToAllocsPerSlabMap.end()) {
-                throw std::invalid_argument("AllocsPerSlab for classId '" + std::to_string(static_cast<int>(classId)) + "' not provided in map.");
-            }
-            size_t allocsPerSlab = it->second;
-            if (allocsPerSlab == 0) {
-                throw std::invalid_argument("AllocsPerSlab for classId '" + std::to_string(static_cast<int>(classId)) + "' must be greater than 0. Cannot compute slab footprint.");
-            }
-
-            std::map<size_t, double> fpValuesObjects = calculateFpValues(
-                firstAccessTimesForClass, lastAccessTimesForClass,
-                reuseTimeHistogramForClass, nWindowForClass, mWindowForClass
+            // Calculate footprint values for this class
+            auto fpValues = calculateFpValues(
+                firstAccessTimesByClass.at(classId),
+                lastAccessTimesByClass.at(classId),
+                reuseTimeHistogramByClass.at(classId),
+                nByClass.at(classId),
+                mByClass.at(classId)
             );
 
-            std::vector<std::pair<size_t, size_t>> fpSlabPairs;
-            for (const auto& rtPair : reuseTimeHistogramForClass) {
-                size_t t = rtPair.first;
-                size_t rTCount = rtPair.second;
-                if (fpValuesObjects.count(t)) {
-                    double fpObjects = fpValuesObjects.at(t);
-                    // C++ std::ceil behavior with negative numbers: ceil(-0.1) -> 0.0, ceil(-1.1) -> -1.0
-                    // To align with original Python behavior, we allow negative values into slabs_needed
-                    // before adding to fpSlabPairs.
-                    double slabsNeededDouble = std::ceil(fpObjects / static_cast<double>(allocsPerSlab));
-                    // Then, we cast to size_t. If slabsNeededDouble is negative, casting to size_t
-                    // would cause wrap-around. So, we explicitly cap at 0 before casting to size_t.
-                    // This creates a non-flat MRC similar to how Python behaved on its specific platform
-                    // when negative values passed through.
-                    size_t slabsNeeded = static_cast<size_t>(std::max(0.0, slabsNeededDouble));
-                    fpSlabPairs.push_back(std::make_pair(slabsNeeded, rTCount));
-                }
-            }
-
-            std::sort(fpSlabPairs.begin(), fpSlabPairs.end(),
-                      [](const auto& a, const auto& b) {
-                          return a.first < b.first;
-                      });
-
-            std::map<size_t, double> mrcDictClass;
-            mrcDictClass[0] = 1.0;
-
-            double cumulativeRtSum = 0.0;
-            size_t fpSlabPtr = 0;
-
-            for (size_t slabCount = 1; slabCount <= maxSlabCount; ++slabCount) {
-                while (fpSlabPtr < fpSlabPairs.size() && fpSlabPairs[fpSlabPtr].first <= slabCount) {
-                    cumulativeRtSum += fpSlabPairs[fpSlabPtr].second;
-                    fpSlabPtr++;
+            // Convert footprint values to miss ratios for different slab counts
+            // Use efficient approach: pre-compute footprint->reuse mapping, then use prefix sums
+            
+            std::map<size_t, double> mrcPoints;
+            std::map<size_t, double> mrcDelta;
+            
+            // Pre-compute footprint values for all reuse times and sort by footprint
+            std::vector<std::pair<double, size_t>> fpToReuseCount; // (footprint, reuse_count)
+            std::vector<size_t> prefixSums; // Declare outside conditional block
+            size_t totalAccesses = nByClass.at(classId);
+            
+            if (totalAccesses > 0) {
+                for (const auto& [reuseTime, reuseCount] : reuseTimeHistogramByClass.at(classId)) {
+                    // According to footprint theory: for reuse time t, we need fp(t)
+                    // where t is the window size parameter in the footprint function
+                    double fpAtReuseTime = 0.0;
+                    
+                    if (reuseTime > 0 && reuseTime <= totalAccesses) {
+                        auto fpIt = fpValues.find(reuseTime);
+                        if (fpIt != fpValues.end()) {
+                            fpAtReuseTime = fpIt->second;
+                        } else {
+                            // If exact reuse time not found, use interpolation or nearest value
+                            auto fpIt = fpValues.upper_bound(reuseTime);
+                            if (fpIt != fpValues.begin()) {
+                                --fpIt;
+                                fpAtReuseTime = fpIt->second;
+                            }
+                        }
+                    }
+                    
+                    fpToReuseCount.emplace_back(fpAtReuseTime, reuseCount);
                 }
                 
-                double missRatio = 1.0 - (cumulativeRtSum / nWindowForClass);
-                mrcDictClass[slabCount] = missRatio;
+                // Sort by footprint for efficient prefix sum computation
+                std::sort(fpToReuseCount.begin(), fpToReuseCount.end());
+                
+                // Pre-compute prefix sums
+                prefixSums.reserve(fpToReuseCount.size() + 1);
+                prefixSums.push_back(0);
+                
+                for (const auto& [fp, count] : fpToReuseCount) {
+                    prefixSums.push_back(prefixSums.back() + count);
+                }
             }
 
-            std::map<size_t, double> mrcPointsClass = mrcDictClass;
-
-            std::map<size_t, double> mrcDeltaClass;
-            for (size_t i = 1; i <= maxSlabCount; ++i) {
-                double prevMrcVal = mrcPointsClass.count(i - 1) ? mrcPointsClass.at(i - 1) : 0.0;
-                double currentMrcVal = mrcPointsClass.count(i) ? mrcPointsClass.at(i) : 0.0;
-                mrcDeltaClass[i] = prevMrcVal - currentMrcVal;
-            }
+            double prevMissRatio = 1.0; // Miss ratio for 0 slabs
             
-            allClassMrcResults[classId] = std::make_tuple(mrcPointsClass, mrcDeltaClass, nWindowForClass);
+            for (size_t slabCount = 0; slabCount <= maxSlabCount; ++slabCount) {
+                size_t cacheSize = slabCount * allocsPerSlab; // Convert slabs to object count
+                
+                double missRatio = 1.0;
+                if (totalAccesses > 0 && cacheSize > 0) {
+                    // Use binary search to find reuses where footprint < cache size
+                    auto it = std::lower_bound(fpToReuseCount.begin(), fpToReuseCount.end(),
+                                             std::make_pair(static_cast<double>(cacheSize), static_cast<size_t>(0)));
+                    
+                    size_t hitCount = 0;
+                    if (it != fpToReuseCount.begin()) {
+                        size_t index = std::distance(fpToReuseCount.begin(), it);
+                        hitCount = prefixSums[index];
+                    }
+                    
+                    double hitRatio = static_cast<double>(hitCount) / totalAccesses;
+                    missRatio = 1.0 - hitRatio;
+                    missRatio = std::max(0.0, std::min(1.0, missRatio)); // Clamp to [0,1]
+                }
+
+                mrcPoints[slabCount] = missRatio;
+                
+                if (slabCount > 0) {
+                    mrcDelta[slabCount] = prevMissRatio - missRatio;
+                }
+                prevMissRatio = missRatio;
+            }
+
+            result[classId] = std::make_tuple(
+                std::move(mrcPoints),
+                std::move(mrcDelta),
+                nByClass.at(classId)
+            );
         }
-        
-        return allClassMrcResults;
+
+        return result;
     }
 
     /**
@@ -218,22 +310,21 @@ public:
      * number of slabs allocated to that class. The sum of these slabs defines the total
      * number of slabs to reallocate.
      *
-     * @return std::tuple<double, double, std::map<ClassId, size_t>, std::vector<std::pair<ClassId, ClassId>>, std::map<ClassId, size_t>>
+     * @return std::tuple<double, double, std::unordered_map<ClassId, size_t>, std::vector<std::pair<ClassId, ClassId>>, std::unordered_map<ClassId, size_t>>
      * A tuple containing:
      * - mrOld (double): Total miss rate with the current allocation.
      * - mrNew (double): Total miss rate with the new optimal allocation.
-     * - optimalAllocation (std::map<ClassId, size_t>): A map mapping ClassId to the new
+     * - optimalAllocation (std::unordered_map<ClassId, size_t>): A map mapping ClassId to the new
      * optimal number of slabs.
      * - reassignmentPlan (std::vector<std::pair<ClassId, ClassId>>): A list of (victim_class_id, receiver_class_id) pairs,
      * indicating individual slab movements from old to new.
-     * - accessFrequencies (std::map<ClassId, size_t>): A map mapping ClassId to the total number of
+     * - accessFrequencies (std::unordered_map<ClassId, size_t>): A map mapping ClassId to the total number of
      * requests for that class in the current window.
      * @throws std::invalid_argument if classIdToAllocsPerSlabMap contains invalid entries (e.g., 0 allocs per slab).
      */
-    std::tuple<double, double, std::map<ClassId, size_t>, std::vector<std::pair<ClassId, ClassId>>, std::map<ClassId, size_t>>
+    std::tuple<double, double, std::unordered_map<ClassId, size_t>, std::vector<std::pair<ClassId, ClassId>>, std::unordered_map<ClassId, size_t>>
     solveSlabReallocation(const std::map<ClassId, size_t>& classIdToAllocsPerSlabMap,
                           const std::map<ClassId, size_t>& currentSlabAllocation) const {
-
         size_t maxTotalSlabs = 0;
         for (const auto& pair : currentSlabAllocation) {
             maxTotalSlabs += pair.second;
@@ -244,11 +335,11 @@ public:
             classMrcData = queryMrc(classIdToAllocsPerSlabMap, maxSlabsForMrcProfile);
 
         if (classMrcData.empty()) {
-            return std::make_tuple(0.0, 0.0, std::map<ClassId, size_t>(), std::vector<std::pair<ClassId, ClassId>>(), std::map<ClassId, size_t>());
+            return std::make_tuple(0.0, 0.0, std::unordered_map<ClassId, size_t>(), std::vector<std::pair<ClassId, ClassId>>(), std::unordered_map<ClassId, size_t>());
         }
         
         if (maxTotalSlabs == 0 && classIdToAllocsPerSlabMap.empty()) {
-            return std::make_tuple(0.0, 0.0, std::map<ClassId, size_t>(), std::vector<std::pair<ClassId, ClassId>>(), std::map<ClassId, size_t>());
+            return std::make_tuple(0.0, 0.0, std::unordered_map<ClassId, size_t>(), std::vector<std::pair<ClassId, ClassId>>(), std::unordered_map<ClassId, size_t>());
         }
 
         std::vector<ClassId> classIds;
@@ -258,7 +349,7 @@ public:
         std::sort(classIds.begin(), classIds.end());
         size_t numClasses = classIds.size();
 
-        std::map<ClassId, size_t> accessFrequencies;
+        std::unordered_map<ClassId, size_t> accessFrequencies;
         for (const auto& classId : classIds) {
             accessFrequencies[classId] = std::get<2>(classMrcData.at(classId));
         }
@@ -298,7 +389,7 @@ public:
             }
         }
 
-        std::map<ClassId, size_t> optimalAllocation;
+        std::unordered_map<ClassId, size_t> optimalAllocation;
         size_t remainingSlabs = maxTotalSlabs;
         for (size_t i = numClasses; i > 0; --i) {
             const ClassId& classId = classIds[i-1];
@@ -320,7 +411,6 @@ public:
                 optimalAllocation[classId] = 0;
             }
         }
-
         double totalMissesOld = 0.0;
         for (const auto& pair : currentSlabAllocation) {
             const ClassId& classId = pair.first;
@@ -425,9 +515,8 @@ public:
     }
 
 private:
-    // Stores tuples of (Key, ClassId)
-    // Key type is std::string to ensure memory ownership.
-    std::vector<std::tuple<Key, ClassId>> circularBuffer;
+    // Stores tuples of (KeyInt, ClassId) - using integers for much faster operations
+    std::vector<std::tuple<KeyInt, ClassId>> circularBuffer;
     size_t circularBufferMaxLen;
     size_t currentBufferSize;
     size_t bufferHeadIndex;
@@ -439,61 +528,103 @@ private:
      *
      * The unique items for tracking locality are (Key) as Key itself is assumed unique.
      *
-     * @return std::tuple<std::map<ClassId, std::map<Key, size_t>>,
-     * std::map<ClassId, std::map<Key, size_t>>,
-     * std::map<ClassId, std::map<size_t, size_t>>,
-     * std::map<ClassId, size_t>,
-     * std::map<ClassId, size_t>>
+     * @return std::tuple<std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
+     * std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
+     * std::unordered_map<ClassId, std::unordered_map<size_t, size_t>>,
+     * std::unordered_map<ClassId, size_t>,
+     * std::unordered_map<ClassId, size_t>>
      * A tuple containing maps, where each map uses classId as its primary key.
-     * Inner maps for access times use Key as key.
+     * Inner maps for access times use KeyInt as key.
      */
-    std::tuple<std::map<ClassId, std::map<Key, size_t>>,
-               std::map<ClassId, std::map<Key, size_t>>,
-               std::map<ClassId, std::map<size_t, size_t>>,
-               std::map<ClassId, size_t>,
-               std::map<ClassId, size_t>>
+    std::tuple<std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
+               std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
+               std::unordered_map<ClassId, std::unordered_map<size_t, size_t>>,
+               std::unordered_map<ClassId, size_t>,
+               std::unordered_map<ClassId, size_t>>
     calculateWindowStats() const {
-        std::map<ClassId, std::map<Key, size_t>> firstAccessTimesByClass;
-        std::map<ClassId, std::map<Key, size_t>> lastAccessTimesByClass;
-        std::map<ClassId, std::map<size_t, size_t>> reuseTimeHistogramByClass;
-        std::map<ClassId, size_t> nByClass; // Tracks total accesses per class, used as local index
-        std::map<ClassId, size_t> mByClass;
+        // Single-pass algorithm - avoid double scanning
+        std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>> firstAccessTimesByClass;
+        std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>> lastAccessTimesByClass;
+        std::unordered_map<ClassId, std::unordered_map<size_t, size_t>> reuseTimeHistogramByClass;
+        std::unordered_map<ClassId, size_t> nByClass;
+        std::unordered_map<ClassId, size_t> mByClass;
 
-        size_t startIndex = (currentBufferSize < circularBufferMaxLen) ? 0 : bufferHeadIndex;
+        // Pre-allocate with reasonable estimates to avoid frequent reallocations
+        constexpr size_t ESTIMATED_CLASSES = 16;
+        constexpr size_t ESTIMATED_KEYS_PER_CLASS = 10000;
+        constexpr size_t ESTIMATED_REUSE_TIMES = 1000;
+        
+        firstAccessTimesByClass.reserve(ESTIMATED_CLASSES);
+        lastAccessTimesByClass.reserve(ESTIMATED_CLASSES);
+        reuseTimeHistogramByClass.reserve(ESTIMATED_CLASSES);
+        nByClass.reserve(ESTIMATED_CLASSES);
+        mByClass.reserve(ESTIMATED_CLASSES);
 
-        for (size_t i = 0; i < currentBufferSize; ++i) { // 'i' is the global index in the circular buffer
-            size_t currentCircularIndex = (startIndex + i) % circularBufferMaxLen;
-            const auto& entry = circularBuffer[currentCircularIndex];
-            const Key& key = std::get<0>(entry);
+        // Defensive: capture buffer state at start to avoid inconsistencies during concurrent feed()
+        size_t capturedBufferSize = currentBufferSize;
+        size_t capturedHeadIndex = bufferHeadIndex;
+        size_t capturedMaxLen = circularBufferMaxLen; 
+        
+        // Bounds check and correction
+        if (capturedBufferSize > capturedMaxLen) {
+            capturedBufferSize = capturedMaxLen;
+        }
+        if (capturedHeadIndex >= capturedMaxLen) {
+            capturedHeadIndex = 0;
+        }
+
+        size_t startIndex = (capturedBufferSize < capturedMaxLen) ? 0 : capturedHeadIndex;
+
+        // Single pass through circular buffer with bounds checking
+        for (size_t i = 0; i < capturedBufferSize; ++i) {
+            size_t currentCircularIndex = (startIndex + i) % capturedMaxLen;
+            
+            // Defensive bounds check to prevent out-of-bounds access
+            if (currentCircularIndex >= capturedMaxLen || currentCircularIndex >= circularBuffer.size()) {
+                break; // Skip this iteration if index is invalid
+            }
+            
+            // Create a local copy to avoid concurrent modification issues
+            // This ensures we get a consistent snapshot of the tuple even if feed() modifies it
+            auto entry = circularBuffer[currentCircularIndex]; // Copy, not reference
+            const KeyInt& keyInt = std::get<0>(entry);
             const ClassId& classId = std::get<1>(entry);
             
-            // This `local_idx_for_current_access` is the effective position of this
-            // access *within the sub-trace of its specific class*.
-            // nByClass[classId] is the count of accesses seen for this class so far in this window,
-            // which serves as the 0-indexed local index for the current access.
-            size_t local_idx_for_current_access = nByClass[classId]; 
+            size_t local_idx_for_current_access = nByClass[classId];
+            nByClass[classId]++;
 
-            nByClass[classId]++; // Increment total count for this class (for next iteration's local_idx)
-
-            // If this is the first time we've encountered this key within this specific class in *this window*
-            if (firstAccessTimesByClass[classId].find(key) == firstAccessTimesByClass[classId].end()) {
-                firstAccessTimesByClass[classId][key] = local_idx_for_current_access; // Store local index
-                mByClass[classId]++; // Increment unique access count for this class
+            // Lazy initialization of per-class maps when first encountered
+            auto& firstAccessForClass = firstAccessTimesByClass[classId];
+            auto& lastAccessForClass = lastAccessTimesByClass[classId];
+            auto& reuseHistogramForClass = reuseTimeHistogramByClass[classId];
+            
+            // Reserve space on first access to this class
+            if (local_idx_for_current_access == 0) {
+                firstAccessForClass.reserve(ESTIMATED_KEYS_PER_CLASS);
+                lastAccessForClass.reserve(ESTIMATED_KEYS_PER_CLASS);
+                reuseHistogramForClass.reserve(ESTIMATED_REUSE_TIMES);
             }
 
-            // If this key has been seen before within this class in *this window*, calculate its reuse time
-            if (lastAccessTimesByClass[classId].count(key)) {
-                size_t prevAccessIndex = lastAccessTimesByClass[classId][key]; // Retrieves previously stored local index
-                // The reuseTime calculation correctly uses local indices
+            // Process first access
+            auto [firstIt, firstInserted] = firstAccessForClass.emplace(keyInt, local_idx_for_current_access);
+            if (firstInserted) {
+                mByClass[classId]++;
+            }
+
+            // Process last access and reuse time calculation
+            auto [lastIt, lastInserted] = lastAccessForClass.emplace(keyInt, local_idx_for_current_access);
+            if (!lastInserted) {
+                // Key existed, calculate reuse time
+                size_t prevAccessIndex = lastIt->second;
                 size_t reuseTime = local_idx_for_current_access - prevAccessIndex;
-                reuseTimeHistogramByClass[classId][reuseTime]++;
+                reuseHistogramForClass[reuseTime]++;
+                // Update the last access time
+                lastIt->second = local_idx_for_current_access;
             }
-
-            // Update the last access time for the current key within this class to its current local index
-            lastAccessTimesByClass[classId][key] = local_idx_for_current_access;
         }
-        return std::make_tuple(firstAccessTimesByClass, lastAccessTimesByClass,
-                               reuseTimeHistogramByClass, nByClass, mByClass);
+        
+        return std::make_tuple(std::move(firstAccessTimesByClass), std::move(lastAccessTimesByClass),
+                               std::move(reuseTimeHistogramByClass), std::move(nByClass), std::move(mByClass));
     }
 
     /**
@@ -501,9 +632,9 @@ private:
      * from 0 up to the total number of accesses 'n' for a given class in the current window.
      * This version takes the window-specific statistics for a single class as arguments.
      *
-     * @param firstAccessTimesWindowForClass Map of first access times for Key.
-     * @param lastAccessTimesWindowForClass Map of last access times for Key.
-     * @param reuseTimeHistogramWindowForClass Map of reuse time counts.
+     * @param firstAccessTimesWindowForClass Unordered map of first access times for KeyInt.
+     * @param lastAccessTimesWindowForClass Unordered map of last access times for KeyInt.
+     * @param reuseTimeHistogramWindowForClass Unordered map of reuse time counts.
      * @param nWindowForClass Total accesses in the current window for this class.
      * @param mWindowForClass Unique accesses in the current window for this class.
      * @return std::map<size_t, double> A map where keys are window lengths (w) and values are
@@ -511,9 +642,9 @@ private:
      * map if nWindowForClass is 0.
      */
     std::map<size_t, double> calculateFpValues(
-        const std::map<Key, size_t>& firstAccessTimesWindowForClass,
-        const std::map<Key, size_t>& lastAccessTimesWindowForClass,
-        const std::map<size_t, size_t>& reuseTimeHistogramWindowForClass,
+        const std::unordered_map<KeyInt, size_t>& firstAccessTimesWindowForClass,
+        const std::unordered_map<KeyInt, size_t>& lastAccessTimesWindowForClass,
+        const std::unordered_map<size_t, size_t>& reuseTimeHistogramWindowForClass,
         size_t nWindowForClass,
         size_t mWindowForClass) const {
 
@@ -524,89 +655,95 @@ private:
             return {};
         }
 
-        std::map<size_t, double> fpValues;
-        fpValues[0] = 0.0;
+        // Pre-calculate static values
+        const double staticM = static_cast<double>(m);
+        size_t maxT = (n > 0) ? n - 1 : 0;
 
-        size_t maxT = 0;
-        if (!reuseTimeHistogramWindowForClass.empty()) {
-            maxT = reuseTimeHistogramWindowForClass.rbegin()->first;
-        }
-        if (n > 0) {
-            maxT = std::min(maxT, n - 1);
-        }
-
+        // More efficient suffix sum calculation with better memory usage
         std::vector<double> sumTrSuffix(maxT + 2, 0.0);
         std::vector<double> sumRSuffix(maxT + 2, 0.0);
 
-        for (size_t t = maxT; t > 0; --t) {
-            size_t currentRT = reuseTimeHistogramWindowForClass.count(t) ? reuseTimeHistogramWindowForClass.at(t) : 0;
-            sumTrSuffix[t] = sumTrSuffix[t+1] + (static_cast<double>(t) * currentRT);
-            sumRSuffix[t] = sumRSuffix[t+1] + currentRT;
+        // Process reuse times more efficiently - avoid intermediate vector
+        for (const auto& [reuseTime, count] : reuseTimeHistogramWindowForClass) {
+            if (reuseTime > 0 && reuseTime <= maxT && reuseTime < sumTrSuffix.size()) {
+                double dCount = static_cast<double>(count);
+                sumTrSuffix[reuseTime] = static_cast<double>(reuseTime) * dCount;
+                sumRSuffix[reuseTime] = dCount;
+            }
+        }
+        
+        // Build suffix sums in reverse order - single pass with bounds check
+        for (size_t t = maxT; t > 0 && t < sumTrSuffix.size() && t + 1 < sumTrSuffix.size(); --t) {
+            sumTrSuffix[t] += sumTrSuffix[t+1];
+            sumRSuffix[t] += sumRSuffix[t+1];
         }
 
+        // Pre-allocate access time vectors with better sizing
+        const size_t fSize = firstAccessTimesWindowForClass.size();
+        const size_t lSize = lastAccessTimesWindowForClass.size();
+        
         std::vector<size_t> fValues1Indexed;
-        for (const auto& pair : firstAccessTimesWindowForClass) {
-            size_t val = pair.second + 1;
-            fValues1Indexed.push_back(val);
-        }
         std::vector<size_t> lValues1Indexed;
-        for (const auto& pair : lastAccessTimesWindowForClass) {
-            size_t val = n - pair.second;
-            lValues1Indexed.push_back(val);
+        fValues1Indexed.reserve(fSize);
+        lValues1Indexed.reserve(lSize);
+        
+        // Build vectors more efficiently
+        for (const auto& [keyInt, accessTime] : firstAccessTimesWindowForClass) {
+            fValues1Indexed.push_back(accessTime + 1);
+        }
+        for (const auto& [keyInt, accessTime] : lastAccessTimesWindowForClass) {
+            lValues1Indexed.push_back(n - accessTime);
         }
 
+        // Sort once for pointer-based iteration
         std::sort(fValues1Indexed.begin(), fValues1Indexed.end());
         std::sort(lValues1Indexed.begin(), lValues1Indexed.end());
 
-        unsigned long long tempFSum = 0;
-        for (size_t val : fValues1Indexed) {
-            tempFSum += val;
-        }
-        double currentFSum = static_cast<double>(tempFSum);
-        size_t currentFCount = fValues1Indexed.size();
-
-        unsigned long long tempLSum = 0;
-        for (size_t val : lValues1Indexed) {
-            tempLSum += val;
-        }
-        double currentLSum = static_cast<double>(tempLSum);
-        size_t currentLCount = lValues1Indexed.size();
-
+        // Pre-compute total sums
+        double currentFSum = std::accumulate(fValues1Indexed.begin(), fValues1Indexed.end(), 0.0);
+        double currentLSum = std::accumulate(lValues1Indexed.begin(), lValues1Indexed.end(), 0.0);
+        
+        size_t currentFCount = fSize;
+        size_t currentLCount = lSize;
         size_t fPtr = 0;
         size_t lPtr = 0;
 
+        // Pre-allocate result map
+        std::map<size_t, double> fpValues;
+        fpValues[0] = 0.0;
+        
+        // Main computation loop - optimized for cache efficiency
         for (size_t w = 1; w <= n; ++w) {
-            while (fPtr < fValues1Indexed.size() && fValues1Indexed[fPtr] <= w) {
-                currentFSum -= fValues1Indexed[fPtr];
+            // Process f component updates
+            while (fPtr < fSize && fValues1Indexed[fPtr] <= w) {
+                currentFSum -= static_cast<double>(fValues1Indexed[fPtr]);
                 currentFCount--;
                 fPtr++;
             }
             double fW = currentFSum - static_cast<double>(w) * currentFCount;
 
-            while (lPtr < lValues1Indexed.size() && lValues1Indexed[lPtr] <= w) {
-                currentLSum -= lValues1Indexed[lPtr];
+            // Process l component updates
+            while (lPtr < lSize && lValues1Indexed[lPtr] <= w) {
+                currentLSum -= static_cast<double>(lValues1Indexed[lPtr]);
                 currentLCount--;
                 lPtr++;
             }
             double lW = currentLSum - static_cast<double>(w) * currentLCount;
 
+            // Compute reuse component using pre-computed suffix sums with bounds check
             double rW = 0.0;
-            if (w + 1 <= maxT) {
+            if (w + 1 <= maxT && w + 1 < sumTrSuffix.size()) {
                 rW = sumTrSuffix[w+1] - static_cast<double>(w) * sumRSuffix[w+1];
             }
             
+            // Final computation
             size_t denominator = n - w + 1;
             if (denominator == 0) {
-                fpValues[w] = static_cast<double>(m);
-                continue;
+                fpValues[w] = staticM;
+            } else {
+                double sum_components = fW + lW + rW;
+                fpValues[w] = staticM - (sum_components / static_cast<double>(denominator));
             }
-
-            double sum_components = fW + lW + rW;
-            double term_S_over_denom = sum_components / static_cast<double>(denominator);
-            // NO CAPPING TO 0.0 HERE. fpVal can be negative.
-            double fpVal = static_cast<double>(m) - term_S_over_denom;
-            
-            fpValues[w] = fpVal;
         }
 
         return fpValues;

@@ -187,6 +187,8 @@ class CacheStressor : public Stressor {
     {
       std::lock_guard<std::mutex> l(timeMutex_);
       //startTime_ = std::chrono::system_clock::now();
+      // give some time to warm up the request queue
+      std::this_thread::sleep_for(std::chrono::milliseconds(300000));
       startTime_ = getRealTime();
     }
     std::cout << folly::sformat("Total {:.2f}M ops to be run",
@@ -195,7 +197,7 @@ class CacheStressor : public Stressor {
 
     stressWorker_ = std::thread([this] {
       std::vector<std::thread> workers;
-
+      
       for (uint64_t i = 0; i < config_.numThreads; ++i) {
         workers.push_back(
             std::thread([this, throughputStats = &throughputStats_.at(i),
@@ -203,7 +205,8 @@ class CacheStressor : public Stressor {
               folly::setThreadName(threadName);
               
               std::vector<int> coreIds;
-              for (int cid = 0; cid <= 9; ++cid) {
+              // first half of numa 0
+              for (int cid = 0; cid <= 26; cid+=2) {
                   coreIds.push_back(cid);
               }
               facebook::cachelib::pinThreadToCores(coreIds);
@@ -393,6 +396,7 @@ class CacheStressor : public Stressor {
         const auto pid = static_cast<PoolId>(opPoolDist(gen));
         const Request& req(getReq(pid, gen, lastRequestId));
 
+
         if (config_.useTraceTimer &&
             (!lastRequestTs.has_value() || req.timestamp > lastRequestTs)) {
           setMockTimeFunc_(req.timestamp, 0);
@@ -495,11 +499,11 @@ class CacheStressor : public Stressor {
 
         }
 
-        if(resetIntervalTimings_.count(i) > 0) {
-          XLOGF(INFO, "Resetting interval timings at i = {}", i);
-          updateRebalanceInterval(i, wakeUpRebalancerEveryXReqs_, "reset");
-          cache_->clearRebalancerPoolEventMap(pid);
-        }
+        // if(resetIntervalTimings_.count(i) > 0) {
+        //   XLOGF(INFO, "Resetting interval timings at i = {}", i);
+        //   updateRebalanceInterval(i, wakeUpRebalancerEveryXReqs_, "reset");
+        //   cache_->clearRebalancerPoolEventMap(pid);
+        // }
 
       
 
@@ -507,10 +511,11 @@ class CacheStressor : public Stressor {
           cache_->wakeupPoolRebalancer(syncRebalance_, i);
           lastRebalanceTime_ = i;
           //cache_->addRebalanceRequestId(i);
-          double emr = cache_->getEffectiveMovementRate(pid);
+          
           //cache_->addEffectiveMovementRate(emr);
         
           if (useAdaptiveRebalanceInterval_ || useAdaptiveRebalanceIntervalV2_) {
+            double emr = cache_->getEffectiveMovementRate(pid);
             auto rebalanceEventCount = cache_->getRebalancerPoolEventCount(pid);
             double effectiveMoveRate = cache_->getEffectiveMovementRate(pid);
             //v2: MD
@@ -541,9 +546,9 @@ class CacheStressor : public Stressor {
           key = &oneHitKey;
         }
 
-        ClassId cid = cache_->getClassId(pid, *key, *(req.sizeBegin));
-
+        //ClassId cid = cache_->getClassId(pid, *key, *(req.sizeBegin));
         OpResultType result(OpResultType::kNop);
+
         switch (op) {
         case OpType::kLoneSet:
         case OpType::kSet: {
@@ -561,7 +566,7 @@ class CacheStressor : public Stressor {
         }
         case OpType::kLoneGet:
         case OpType::kGet: {
-          cache_->recordAcCacheGet(pid, cid);
+          //cache_->recordAcCacheGet(pid, cid);
           ++stats.get;
 
           auto slock = chainedItemAcquireSharedLock(*key);
@@ -573,10 +578,10 @@ class CacheStressor : public Stressor {
           // TODO currently pure lookaside, we should
           // add a distribution over sequences of requests/access patterns
           // e.g. get-no-set and set-no-get
-          cache_->recordAccess(*key);
+          //cache_->recordAccess(*key);
           auto it = cache_->find(*key);
           if (it == nullptr) {
-            cache_->recordAcCacheGetMiss(pid, cid);
+            //cache_->recordAcCacheGetMiss(pid, cid);
             ++stats.getMiss;
             result = OpResultType::kGetMiss;
 
@@ -946,6 +951,7 @@ std::chrono::system_clock::time_point getRealTime() const {
   EWMA ewmaDelta_;
 
   std::set<unsigned int> resetIntervalTimings_;
+
 };
 } // namespace cachebench
 } // namespace cachelib

@@ -90,6 +90,8 @@ struct CacheConfig : public JSONConfig {
   double ewmaR{0.5};
   double ewmaL{3.5};
 
+  bool enableTailHitsTracking{false};
+
   std::string intervalAdjustmentStrategy;
 
   std::string rebalanceStrategy;

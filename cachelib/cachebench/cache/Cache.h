@@ -85,7 +85,8 @@ class RetentionAP final : public NvmAdmissionPolicy<Cache> {
 // A specialized Cache for cachebench use, backed by Cachelib.
 // Items value in this cache follows CacheValue schema, which
 // contains a few integers for sanity checks use. So it is invalid
-// to use item.getMemory and item.getSize APIs directly and caller must use
+// to use item.getMemory and item.
+//  APIs directly and caller must use
 // getMemory() through this cache instance.
 template <typename Allocator>
 class Cache {
@@ -333,7 +334,6 @@ class Cache {
     // synchronously
     cache_->wakeupPoolRebalancer(synchronousOp, request_id);
   }
-
   void clearRebalancerPoolEventMap(PoolId pid) {
     cache_->clearRebalancerPoolEventMap(pid);
   }
@@ -625,7 +625,7 @@ inline typename TinyLFUTailAllocator::MMConfig makeMMConfig(
 template <>
 inline typename Simple3QAllocator::MMConfig makeMMConfig(
     CacheConfig const& config) {
-  return Simple3QAllocator::MMConfig(0, //refresh sec, quick promotion
+  return Simple3QAllocator::MMConfig(config.lruRefreshSec, //refresh sec, quick promotion
                                   config.lruRefreshRatio,
                                   config.lruUpdateOnWrite,
                                   config.lruUpdateOnRead,
@@ -642,7 +642,7 @@ inline typename Simple3QAllocator::MMConfig makeMMConfig(
 template <>
 inline typename Simple2QAllocator::MMConfig makeMMConfig(
     CacheConfig const& config) {
-  return Simple2QAllocator::MMConfig(0, //refresh sec, quick promotion
+  return Simple2QAllocator::MMConfig(config.lruRefreshSec, //refresh sec, quick promotion
                                   config.lruRefreshRatio,
                                   config.lruUpdateOnWrite,
                                   config.lruUpdateOnRead,
@@ -682,7 +682,7 @@ Cache<Allocator>::Cache(const CacheConfig& config,
   // for now do this for every one
   //allocatorConfig_.enableTailHitsTracking();
   if (config_.rebalanceStrategy == "marginal-hits" ||
-      config_.rebalanceStrategy == "marginal-hits-new" || config_.rebalanceStrategy == "marginal-hits-old") {
+      config_.rebalanceStrategy == "marginal-hits-new" || config_.rebalanceStrategy == "marginal-hits-old" || config_.enableTailHitsTracking) {
         allocatorConfig_.enableTailHitsTracking();
   }
   if (config_.rebalanceStrategy == "lama") {
