@@ -1311,6 +1311,8 @@ std::string CacheAllocatorConfig<T>::stringifyRebalanceStrategy(
     return "FreeMem";
   case RebalanceStrategy::HitsPerSlab:
     return "HitsPerSlab";
+  case RebalanceStrategy::EvictionRate:
+    return "EvictionRate";
   case RebalanceStrategy::LruTailAge:
     return "LruTailAge";
   case RebalanceStrategy::PoolResize:

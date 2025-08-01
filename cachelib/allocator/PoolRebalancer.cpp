@@ -161,6 +161,8 @@ bool PoolRebalancer::tryRebalancing(PoolId pid, RebalanceStrategy& strategy, uin
   }
 
   auto currentTimeSec = util::getCurrentTimeMs();
+  XLOGF(DBG,
+        "Trigger rebalance at request_id: {}", request_id);
   const auto context = strategy.pickVictimAndReceiver(cache_, pid);
 
   lastRebalance_[pid] = strategy.isThrashing(pid, context);

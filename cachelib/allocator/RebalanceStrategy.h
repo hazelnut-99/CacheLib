@@ -81,6 +81,7 @@ class RebalanceStrategy {
     MarginalHitsOld,
     FreeMem,
     HitsPerSlab,
+    EvictionRate,
     HitsPerTailSlab,
     LruTailAge,
     LAMA,
