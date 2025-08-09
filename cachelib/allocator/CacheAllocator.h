@@ -4528,7 +4528,7 @@ PoolId CacheAllocator<CacheTrait>::addPool(
   std::unique_lock w(poolsResizeAndRebalanceLock_);
   auto pid = allocator_->addPool(name, size, allocSizes, ensureProvisionable);
   if(config_.enableFootPrintMrc) {
-    footprintMRCs_[pid] = FootprintMRC();
+    footprintMRCs_[pid] = FootprintMRC(config_.footprintBufferSize);
   }
   createMMContainers(pid, std::move(config));
   setRebalanceStrategy(pid, std::move(rebalanceStrategy));

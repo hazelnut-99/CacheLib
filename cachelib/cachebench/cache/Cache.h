@@ -687,6 +687,7 @@ Cache<Allocator>::Cache(const CacheConfig& config,
   }
   if (config_.rebalanceStrategy == "lama") {
     allocatorConfig_.enableFootPrintMrc = true;
+    allocatorConfig_.footprintBufferSize = config_.footprintBufferSize;
   }
   XLOGF(INFO, "Using rebalance interval: {}", config_.poolRebalanceIntervalSec);
   allocatorConfig_.enablePoolRebalancing(

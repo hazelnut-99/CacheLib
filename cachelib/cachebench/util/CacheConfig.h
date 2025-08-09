@@ -125,6 +125,7 @@ struct CacheConfig : public JSONConfig {
   unsigned int mhBufferSize{30};
 
   double lamaMinThreshold{0.005};
+  unsigned int footprintBufferSize{20000000};
 
   bool mhEnableHoldOff{false};
   bool countColdTailHitsOnly{false};

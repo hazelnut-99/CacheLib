@@ -128,7 +128,7 @@ public:
         result.reserve(cacheSizes.size());
 
         // Process each class once and cache results
-        std::unordered_map<ClassId, std::map<size_t, double>> cachedFpValues;
+        std::unordered_map<ClassId, std::vector<double>> cachedFpValues;
         for (const auto& [classId, _] : firstAccessTimesByClass) {
             cachedFpValues[classId] = calculateFpValues(
                 firstAccessTimesByClass.at(classId),
@@ -145,11 +145,9 @@ public:
             for (const auto& [classId, fpValues] : cachedFpValues) {
                 size_t w = std::min(static_cast<size_t>(cacheSize), static_cast<size_t>(nByClass.at(classId)));
                 
-                // Use efficient lookup with lower_bound for better performance
-                auto it = fpValues.upper_bound(w);
-                if (it != fpValues.begin()) {
-                    --it;
-                    totalFpValue += it->second;
+                // Direct array access instead of upper_bound
+                if (w < fpValues.size()) {
+                    totalFpValue += fpValues[w];
                 }
             }
             result.push_back(totalFpValue);
@@ -210,43 +208,20 @@ public:
             std::map<size_t, double> mrcPoints;
             std::map<size_t, double> mrcDelta;
             
-            // Pre-compute footprint values for all reuse times and sort by footprint
-            std::vector<std::pair<double, size_t>> fpToReuseCount; // (footprint, reuse_count)
+            // Pre-compute footprint values for all reuse times - no sorting needed!
             std::vector<size_t> prefixSums; // Declare outside conditional block
             size_t totalAccesses = nByClass.at(classId);
             
             if (totalAccesses > 0) {
-                for (const auto& [reuseTime, reuseCount] : reuseTimeHistogramByClass.at(classId)) {
-                    // According to footprint theory: for reuse time t, we need fp(t)
-                    // where t is the window size parameter in the footprint function
-                    double fpAtReuseTime = 0.0;
-                    
-                    if (reuseTime > 0 && reuseTime <= totalAccesses) {
-                        auto fpIt = fpValues.find(reuseTime);
-                        if (fpIt != fpValues.end()) {
-                            fpAtReuseTime = fpIt->second;
-                        } else {
-                            // If exact reuse time not found, use interpolation or nearest value
-                            auto fpIt = fpValues.upper_bound(reuseTime);
-                            if (fpIt != fpValues.begin()) {
-                                --fpIt;
-                                fpAtReuseTime = fpIt->second;
-                            }
-                        }
-                    }
-                    
-                    fpToReuseCount.emplace_back(fpAtReuseTime, reuseCount);
-                }
+                const auto& reuseTimeHistogram = reuseTimeHistogramByClass.at(classId);
                 
-                // Sort by footprint for efficient prefix sum computation
-                std::sort(fpToReuseCount.begin(), fpToReuseCount.end());
-                
-                // Pre-compute prefix sums
-                prefixSums.reserve(fpToReuseCount.size() + 1);
+                // Pre-compute prefix sums directly from the vector (no sorting needed)
+                prefixSums.reserve(reuseTimeHistogram.size() + 1);
                 prefixSums.push_back(0);
                 
-                for (const auto& [fp, count] : fpToReuseCount) {
-                    prefixSums.push_back(prefixSums.back() + count);
+                for (size_t reuseTime = 0; reuseTime < reuseTimeHistogram.size(); ++reuseTime) {
+                    size_t reuseCount = reuseTimeHistogram[reuseTime];
+                    prefixSums.push_back(prefixSums.back() + reuseCount);
                 }
             }
 
@@ -257,14 +232,23 @@ public:
                 
                 double missRatio = 1.0;
                 if (totalAccesses > 0 && cacheSize > 0) {
-                    // Use binary search to find reuses where footprint < cache size
-                    auto it = std::lower_bound(fpToReuseCount.begin(), fpToReuseCount.end(),
-                                             std::make_pair(static_cast<double>(cacheSize), static_cast<size_t>(0)));
-                    
+                    // Count hits: accesses with reuse time t where fp(t) < cacheSize
                     size_t hitCount = 0;
-                    if (it != fpToReuseCount.begin()) {
-                        size_t index = std::distance(fpToReuseCount.begin(), it);
-                        hitCount = prefixSums[index];
+                    const auto& reuseTimeHistogram = reuseTimeHistogramByClass.at(classId);
+                    
+                    for (size_t reuseTime = 0; reuseTime < reuseTimeHistogram.size(); ++reuseTime) {
+                        if (reuseTimeHistogram[reuseTime] > 0) {
+                            // Get footprint for this reuse time
+                            double fpAtReuseTime = 0.0;
+                            if (reuseTime > 0 && reuseTime < fpValues.size()) {
+                                fpAtReuseTime = fpValues[reuseTime];
+                            }
+                            
+                            // If footprint < cache size, these accesses are hits
+                            if (fpAtReuseTime < static_cast<double>(cacheSize)) {
+                                hitCount += reuseTimeHistogram[reuseTime];
+                            }
+                        }
                     }
                     
                     double hitRatio = static_cast<double>(hitCount) / totalAccesses;
@@ -530,36 +514,19 @@ private:
      *
      * @return std::tuple<std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
      * std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
-     * std::unordered_map<ClassId, std::unordered_map<size_t, size_t>>,
+     * std::unordered_map<ClassId, std::vector<size_t>>,
      * std::unordered_map<ClassId, size_t>,
      * std::unordered_map<ClassId, size_t>>
      * A tuple containing maps, where each map uses classId as its primary key.
      * Inner maps for access times use KeyInt as key.
+     * Reuse time histogram uses vector where index is reuse time and value is count.
      */
     std::tuple<std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
                std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
-               std::unordered_map<ClassId, std::unordered_map<size_t, size_t>>,
+               std::unordered_map<ClassId, std::vector<size_t>>,
                std::unordered_map<ClassId, size_t>,
                std::unordered_map<ClassId, size_t>>
     calculateWindowStats() const {
-        // Single-pass algorithm - avoid double scanning
-        std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>> firstAccessTimesByClass;
-        std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>> lastAccessTimesByClass;
-        std::unordered_map<ClassId, std::unordered_map<size_t, size_t>> reuseTimeHistogramByClass;
-        std::unordered_map<ClassId, size_t> nByClass;
-        std::unordered_map<ClassId, size_t> mByClass;
-
-        // Pre-allocate with reasonable estimates to avoid frequent reallocations
-        constexpr size_t ESTIMATED_CLASSES = 16;
-        constexpr size_t ESTIMATED_KEYS_PER_CLASS = 10000;
-        constexpr size_t ESTIMATED_REUSE_TIMES = 1000;
-        
-        firstAccessTimesByClass.reserve(ESTIMATED_CLASSES);
-        lastAccessTimesByClass.reserve(ESTIMATED_CLASSES);
-        reuseTimeHistogramByClass.reserve(ESTIMATED_CLASSES);
-        nByClass.reserve(ESTIMATED_CLASSES);
-        mByClass.reserve(ESTIMATED_CLASSES);
-
         // Defensive: capture buffer state at start to avoid inconsistencies during concurrent feed()
         size_t capturedBufferSize = currentBufferSize;
         size_t capturedHeadIndex = bufferHeadIndex;
@@ -575,41 +542,68 @@ private:
 
         size_t startIndex = (capturedBufferSize < capturedMaxLen) ? 0 : capturedHeadIndex;
 
-        // Single pass through circular buffer with bounds checking
+        // PASS 1: Count total accesses (n) and unique keys (m) per class
+        std::unordered_map<ClassId, size_t> nByClass;
+        std::unordered_map<ClassId, size_t> mByClass;
+        std::unordered_map<ClassId, std::unordered_set<KeyInt>> uniqueKeysPerClass;
+        
         for (size_t i = 0; i < capturedBufferSize; ++i) {
             size_t currentCircularIndex = (startIndex + i) % capturedMaxLen;
             
-            // Defensive bounds check to prevent out-of-bounds access
+            // Defensive bounds check
             if (currentCircularIndex >= capturedMaxLen || currentCircularIndex >= circularBuffer.size()) {
-                break; // Skip this iteration if index is invalid
+                break;
             }
             
-            // Create a local copy to avoid concurrent modification issues
-            // This ensures we get a consistent snapshot of the tuple even if feed() modifies it
-            auto entry = circularBuffer[currentCircularIndex]; // Copy, not reference
+            auto entry = circularBuffer[currentCircularIndex];
             const KeyInt& keyInt = std::get<0>(entry);
             const ClassId& classId = std::get<1>(entry);
             
-            size_t local_idx_for_current_access = nByClass[classId];
             nByClass[classId]++;
+            uniqueKeysPerClass[classId].insert(keyInt);
+        }
+        
+        // Calculate m for each class
+        for (const auto& [classId, uniqueKeys] : uniqueKeysPerClass) {
+            mByClass[classId] = uniqueKeys.size();
+        }
 
-            // Lazy initialization of per-class maps when first encountered
+        // PASS 2: Initialize data structures with exact sizes and populate them
+        std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>> firstAccessTimesByClass;
+        std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>> lastAccessTimesByClass;
+        std::unordered_map<ClassId, std::vector<size_t>> reuseTimeHistogramByClass;
+        
+        // Pre-allocate with exact sizes
+        for (const auto& [classId, n] : nByClass) {
+            size_t m = mByClass[classId];
+            firstAccessTimesByClass[classId].reserve(m);
+            lastAccessTimesByClass[classId].reserve(m);
+            reuseTimeHistogramByClass[classId].resize(n, 0); // Max reuse time is n-1
+        }
+        
+        // Reset counters for second pass
+        std::unordered_map<ClassId, size_t> currentAccessIndex;
+        
+        for (size_t i = 0; i < capturedBufferSize; ++i) {
+            size_t currentCircularIndex = (startIndex + i) % capturedMaxLen;
+            
+            // Defensive bounds check
+            if (currentCircularIndex >= capturedMaxLen || currentCircularIndex >= circularBuffer.size()) {
+                break;
+            }
+            
+            auto entry = circularBuffer[currentCircularIndex];
+            const KeyInt& keyInt = std::get<0>(entry);
+            const ClassId& classId = std::get<1>(entry);
+            
+            size_t local_idx_for_current_access = currentAccessIndex[classId]++;
+
+            // Process first access
             auto& firstAccessForClass = firstAccessTimesByClass[classId];
             auto& lastAccessForClass = lastAccessTimesByClass[classId];
             auto& reuseHistogramForClass = reuseTimeHistogramByClass[classId];
             
-            // Reserve space on first access to this class
-            if (local_idx_for_current_access == 0) {
-                firstAccessForClass.reserve(ESTIMATED_KEYS_PER_CLASS);
-                lastAccessForClass.reserve(ESTIMATED_KEYS_PER_CLASS);
-                reuseHistogramForClass.reserve(ESTIMATED_REUSE_TIMES);
-            }
-
-            // Process first access
             auto [firstIt, firstInserted] = firstAccessForClass.emplace(keyInt, local_idx_for_current_access);
-            if (firstInserted) {
-                mByClass[classId]++;
-            }
 
             // Process last access and reuse time calculation
             auto [lastIt, lastInserted] = lastAccessForClass.emplace(keyInt, local_idx_for_current_access);
@@ -617,7 +611,10 @@ private:
                 // Key existed, calculate reuse time
                 size_t prevAccessIndex = lastIt->second;
                 size_t reuseTime = local_idx_for_current_access - prevAccessIndex;
+                
+                // No need for bounds check since we pre-allocated with size n
                 reuseHistogramForClass[reuseTime]++;
+                
                 // Update the last access time
                 lastIt->second = local_idx_for_current_access;
             }
@@ -634,17 +631,16 @@ private:
      *
      * @param firstAccessTimesWindowForClass Unordered map of first access times for KeyInt.
      * @param lastAccessTimesWindowForClass Unordered map of last access times for KeyInt.
-     * @param reuseTimeHistogramWindowForClass Unordered map of reuse time counts.
+     * @param reuseTimeHistogramWindowForClass Vector of reuse time counts where index is reuse time.
      * @param nWindowForClass Total accesses in the current window for this class.
      * @param mWindowForClass Unique accesses in the current window for this class.
-     * @return std::map<size_t, double> A map where keys are window lengths (w) and values are
-     * their corresponding average footprint fp(w). Returns an empty
-     * map if nWindowForClass is 0.
+     * @return std::vector<double> A vector where index w represents the footprint fp(w).
+     * Returns an empty vector if nWindowForClass is 0.
      */
-    std::map<size_t, double> calculateFpValues(
+    std::vector<double> calculateFpValues(
         const std::unordered_map<KeyInt, size_t>& firstAccessTimesWindowForClass,
         const std::unordered_map<KeyInt, size_t>& lastAccessTimesWindowForClass,
-        const std::unordered_map<size_t, size_t>& reuseTimeHistogramWindowForClass,
+        const std::vector<size_t>& reuseTimeHistogramWindowForClass,
         size_t nWindowForClass,
         size_t mWindowForClass) const {
 
@@ -663,9 +659,10 @@ private:
         std::vector<double> sumTrSuffix(maxT + 2, 0.0);
         std::vector<double> sumRSuffix(maxT + 2, 0.0);
 
-        // Process reuse times more efficiently - avoid intermediate vector
-        for (const auto& [reuseTime, count] : reuseTimeHistogramWindowForClass) {
-            if (reuseTime > 0 && reuseTime <= maxT && reuseTime < sumTrSuffix.size()) {
+        // Process reuse times more efficiently - direct vector iteration
+        for (size_t reuseTime = 0; reuseTime < reuseTimeHistogramWindowForClass.size(); ++reuseTime) {
+            size_t count = reuseTimeHistogramWindowForClass[reuseTime];
+            if (count > 0 && reuseTime > 0 && reuseTime <= maxT && reuseTime < sumTrSuffix.size()) {
                 double dCount = static_cast<double>(count);
                 sumTrSuffix[reuseTime] = static_cast<double>(reuseTime) * dCount;
                 sumRSuffix[reuseTime] = dCount;
@@ -708,9 +705,8 @@ private:
         size_t fPtr = 0;
         size_t lPtr = 0;
 
-        // Pre-allocate result map
-        std::map<size_t, double> fpValues;
-        fpValues[0] = 0.0;
+        // Pre-allocate result vector with size n+1 (index 0 to n)
+        std::vector<double> fpValues(n + 1, 0.0);
         
         // Main computation loop - optimized for cache efficiency
         for (size_t w = 1; w <= n; ++w) {

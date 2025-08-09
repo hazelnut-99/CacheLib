@@ -529,6 +529,8 @@ class CacheAllocatorConfig {
 
   bool enableFootPrintMrc{false};
 
+  unsigned int footprintBufferSize{20000000};
+
   // Memory monitoring config
   MemoryMonitor::Config memMonitorConfig;
 
@@ -1196,6 +1198,7 @@ std::map<std::string, std::string> CacheAllocatorConfig<T>::serialize() const {
   configMap["tailSlabCnt"] = std::to_string(tailSlabCnt); 
   configMap["enableShardsMrc"] = std::to_string(enableShardsMrc);
   configMap["enableFootPrintMrc"] = std::to_string(enableFootPrintMrc);
+  configMap["footprintBufferSize"] = std::to_string(footprintBufferSize);
   // Stringify enum
   switch (memMonitorConfig.mode) {
   case MemoryMonitor::FreeMemory:
