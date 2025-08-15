@@ -99,9 +99,24 @@ class CacheStressor : public Stressor {
     // this needs to happen befor cache is created
     if (config_.useTraceTimer) {
       XLOG(INFO) << "Using trace timer";
-      mockTimerHandle_ = dlopen("/nfs/hongshu/libmock_time.so", RTLD_LAZY);
-      setMockTimeFunc_ =
-          (set_mock_time_t)dlsym(mockTimerHandle_, "set_mock_time");
+      
+      const char* libPath = std::getenv("MOCK_TIMER_LIB_PATH");
+      if (!libPath) {
+        throw std::runtime_error("MOCK_TIMER_LIB_PATH environment variable not set");
+      }
+      
+      mockTimerHandle_ = dlopen(libPath, RTLD_LAZY);
+      if (!mockTimerHandle_) {
+        throw std::runtime_error(folly::sformat("Failed to load mock timer library: {}", dlerror()));
+      }
+      
+      setMockTimeFunc_ = (set_mock_time_t)dlsym(mockTimerHandle_, "set_mock_time");
+      if (!setMockTimeFunc_) {
+        dlclose(mockTimerHandle_);
+        mockTimerHandle_ = nullptr;
+        throw std::runtime_error("Failed to find set_mock_time symbol");
+      }
+      
       setMockTimeFunc_(0, 0);
     }
 
