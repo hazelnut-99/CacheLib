@@ -29,6 +29,7 @@
 #include <limits>
 #include <chrono>
 #include <iostream>
+#include <mutex>
 
 #include "cachelib/allocator/CacheItem.h"
 #include "cachelib/allocator/memory/Slab.h"
@@ -61,12 +62,86 @@ public:
         circularBufferMaxLen = k;
         currentBufferSize = 0;
         bufferHeadIndex = 0;
+        
+        // Pre-allocate snapshot buffer with same capacity as circular buffer
+        bufferSnapshot.reserve(k);
+    }
+
+    // Copy constructor
+    FootprintMRC(const FootprintMRC& other) {
+        std::lock_guard<std::mutex> lock(other.bufferMutex);
+        circularBuffer = other.circularBuffer;
+        circularBufferMaxLen = other.circularBufferMaxLen;
+        currentBufferSize = other.currentBufferSize;
+        bufferHeadIndex = other.bufferHeadIndex;
+        
+        // Pre-allocate snapshot buffer with same capacity
+        bufferSnapshot.reserve(circularBufferMaxLen);
+    }
+
+    // Move constructor
+    FootprintMRC(FootprintMRC&& other) noexcept {
+        std::lock_guard<std::mutex> lock(other.bufferMutex);
+        circularBuffer = std::move(other.circularBuffer);
+        circularBufferMaxLen = other.circularBufferMaxLen;
+        currentBufferSize = other.currentBufferSize;
+        bufferHeadIndex = other.bufferHeadIndex;
+        
+        // Move snapshot buffer as well
+        bufferSnapshot = std::move(other.bufferSnapshot);
+        
+        // Reset the moved-from object
+        other.circularBufferMaxLen = 0;
+        other.currentBufferSize = 0;
+        other.bufferHeadIndex = 0;
+    }
+
+    // Copy assignment operator
+    FootprintMRC& operator=(const FootprintMRC& other) {
+        if (this != &other) {
+            std::lock(bufferMutex, other.bufferMutex);
+            std::lock_guard<std::mutex> lock1(bufferMutex, std::adopt_lock);
+            std::lock_guard<std::mutex> lock2(other.bufferMutex, std::adopt_lock);
+            
+            circularBuffer = other.circularBuffer;
+            circularBufferMaxLen = other.circularBufferMaxLen;
+            currentBufferSize = other.currentBufferSize;
+            bufferHeadIndex = other.bufferHeadIndex;
+            
+            // Re-allocate snapshot buffer with new capacity
+            bufferSnapshot.clear();
+            bufferSnapshot.reserve(circularBufferMaxLen);
+        }
+        return *this;
+    }
+
+    // Move assignment operator
+    FootprintMRC& operator=(FootprintMRC&& other) noexcept {
+        if (this != &other) {
+            std::lock(bufferMutex, other.bufferMutex);
+            std::lock_guard<std::mutex> lock1(bufferMutex, std::adopt_lock);
+            std::lock_guard<std::mutex> lock2(other.bufferMutex, std::adopt_lock);
+            
+            circularBuffer = std::move(other.circularBuffer);
+            circularBufferMaxLen = other.circularBufferMaxLen;
+            currentBufferSize = other.currentBufferSize;
+            bufferHeadIndex = other.bufferHeadIndex;
+            
+            // Move snapshot buffer as well
+            bufferSnapshot = std::move(other.bufferSnapshot);
+            
+            // Reset the moved-from object
+            other.circularBufferMaxLen = 0;
+            other.currentBufferSize = 0;
+            other.bufferHeadIndex = 0;
+        }
+        return *this;
     }
 
     /**
      * @brief Feeds a new memory access request (key, class ID) into the circular buffer.
      * If the buffer is full, the oldest entry is overwritten.
-     * This method is designed to be memory-safe even under concurrent access.
+     * This method is thread-safe using mutex protection as mentioned in the LAMA paper.
      *
      * @param key The memory access key (KAllocation::Key, which is folly::StringPiece).
      * @param classId An identifier for the class this key belongs to.
@@ -86,23 +161,28 @@ public:
             keyInt = std::hash<std::string>{}(key.str());
         }
         
-        // Capture current head index to avoid race conditions
-        size_t currentHead = bufferHeadIndex;
-        
-        // Bounds check - defensive programming
-        if (currentHead >= circularBufferMaxLen) {
-            currentHead = 0;
-            bufferHeadIndex = 0;
-        }
-        
-        // Store the integer key directly - this is atomic for the tuple assignment
-        circularBuffer[currentHead] = std::make_tuple(keyInt, classId);
-        
-        // Update indices atomically
-        bufferHeadIndex = (currentHead + 1) % circularBufferMaxLen;
+        // Critical section: minimal lock duration for atomic buffer access
+        {
+            std::lock_guard<std::mutex> lock(bufferMutex);
+            
+            // Capture current head index
+            size_t currentHead = bufferHeadIndex;
+            
+            // Bounds check - defensive programming
+            if (currentHead >= circularBufferMaxLen) {
+                currentHead = 0;
+                bufferHeadIndex = 0;
+            }
+            
+            // Store the integer key directly
+            circularBuffer[currentHead] = std::make_tuple(keyInt, classId);
+            
+            // Update indices atomically within the lock
+            bufferHeadIndex = (currentHead + 1) % circularBufferMaxLen;
 
-        if (currentBufferSize < circularBufferMaxLen) {
-            currentBufferSize++;
+            if (currentBufferSize < circularBufferMaxLen) {
+                currentBufferSize++;
+            }
         }
     }
 
@@ -276,9 +356,10 @@ public:
 
     /**
      * @brief Resets the circular buffer, effectively clearing all past requests
-     * and starting a new analysis window.
+     * and starting a new analysis window. Thread-safe.
      */
     void resetWindowAnalysis() {
+        std::lock_guard<std::mutex> lock(bufferMutex);
         currentBufferSize = 0;
         bufferHeadIndex = 0;
     }
@@ -504,6 +585,12 @@ private:
     size_t circularBufferMaxLen;
     size_t currentBufferSize;
     size_t bufferHeadIndex;
+    
+    // Persistent snapshot buffer to avoid repeated allocations across calculateWindowStats calls
+    mutable std::vector<std::tuple<KeyInt, ClassId>> bufferSnapshot;
+    
+    // Mutex for thread-safe access to the circular buffer as mentioned in LAMA paper
+    mutable std::mutex bufferMutex;
 
     /**
      * @brief Calculates firstAccessTimes, lastAccessTimes, reuseTimeHistogram,
@@ -512,50 +599,77 @@ private:
      *
      * The unique items for tracking locality are (Key) as Key itself is assumed unique.
      *
-     * @return std::tuple<std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
-     * std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
+     * @return std::tuple<std::unordered_map<ClassId, std::vector<size_t>>,
+     * std::unordered_map<ClassId, std::vector<size_t>>,
      * std::unordered_map<ClassId, std::vector<size_t>>,
      * std::unordered_map<ClassId, size_t>,
      * std::unordered_map<ClassId, size_t>>
      * A tuple containing maps, where each map uses classId as its primary key.
-     * Inner maps for access times use KeyInt as key.
+     * First and last access times are pre-sorted vectors (no KeyInt mapping needed).
      * Reuse time histogram uses vector where index is reuse time and value is count.
      */
-    std::tuple<std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
-               std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>>,
+    std::tuple<std::unordered_map<ClassId, std::vector<size_t>>,
+               std::unordered_map<ClassId, std::vector<size_t>>,
                std::unordered_map<ClassId, std::vector<size_t>>,
                std::unordered_map<ClassId, size_t>,
                std::unordered_map<ClassId, size_t>>
     calculateWindowStats() const {
-        // Defensive: capture buffer state at start to avoid inconsistencies during concurrent feed()
-        size_t capturedBufferSize = currentBufferSize;
-        size_t capturedHeadIndex = bufferHeadIndex;
-        size_t capturedMaxLen = circularBufferMaxLen; 
+        // Snapshot approach: Copy buffer state atomically, then analyze without holding lock
+        size_t snapshotSize;
+        size_t snapshotHeadIndex;
+        size_t snapshotMaxLen;
         
-        // Bounds check and correction
-        if (capturedBufferSize > capturedMaxLen) {
-            capturedBufferSize = capturedMaxLen;
+        // Critical section: minimal lock duration for consistent snapshot
+        {
+            std::lock_guard<std::mutex> lock(bufferMutex);
+            snapshotSize = currentBufferSize;
+            snapshotHeadIndex = bufferHeadIndex;
+            snapshotMaxLen = circularBufferMaxLen;
+            
+            // Clear and reuse persistent snapshot buffer (capacity already reserved)
+            bufferSnapshot.clear();
+            
+            // Only copy if we have data
+            if (snapshotSize > 0 && !circularBuffer.empty()) {
+                bufferSnapshot = circularBuffer; // Copy entire buffer - no reallocation needed
+            }
         }
-        if (capturedHeadIndex >= capturedMaxLen) {
-            capturedHeadIndex = 0;
+        
+        // Early exit if no data
+        if (snapshotSize == 0 || bufferSnapshot.empty()) {
+            return std::make_tuple(
+                std::unordered_map<ClassId, std::vector<size_t>>(),
+                std::unordered_map<ClassId, std::vector<size_t>>(),
+                std::unordered_map<ClassId, std::vector<size_t>>(),
+                std::unordered_map<ClassId, size_t>(),
+                std::unordered_map<ClassId, size_t>()
+            );
+        }
+        
+        // Bounds check and correction on snapshot
+        if (snapshotSize > snapshotMaxLen) {
+            snapshotSize = snapshotMaxLen;
+        }
+        if (snapshotHeadIndex >= snapshotMaxLen) {
+            snapshotHeadIndex = 0;
         }
 
-        size_t startIndex = (capturedBufferSize < capturedMaxLen) ? 0 : capturedHeadIndex;
+        size_t startIndex = (snapshotSize < snapshotMaxLen) ? 0 : snapshotHeadIndex;
 
-        // PASS 1: Count total accesses (n) and unique keys (m) per class
+        // PASS 1: Count total accesses (n) and unique keys (m) per class using snapshot
         std::unordered_map<ClassId, size_t> nByClass;
         std::unordered_map<ClassId, size_t> mByClass;
         std::unordered_map<ClassId, std::unordered_set<KeyInt>> uniqueKeysPerClass;
         
-        for (size_t i = 0; i < capturedBufferSize; ++i) {
-            size_t currentCircularIndex = (startIndex + i) % capturedMaxLen;
+        for (size_t i = 0; i < snapshotSize; ++i) {
+            size_t currentCircularIndex = (startIndex + i) % snapshotMaxLen;
             
             // Defensive bounds check
-            if (currentCircularIndex >= capturedMaxLen || currentCircularIndex >= circularBuffer.size()) {
+            if (currentCircularIndex >= snapshotMaxLen || currentCircularIndex >= bufferSnapshot.size()) {
                 break;
             }
             
-            auto entry = circularBuffer[currentCircularIndex];
+            auto entry = bufferSnapshot[currentCircularIndex];
             const KeyInt& keyInt = std::get<0>(entry);
             const ClassId& classId = std::get<1>(entry);
             
@@ -569,8 +683,8 @@ private:
         }
 
         // PASS 2: Initialize data structures with exact sizes and populate them
-        std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>> firstAccessTimesByClass;
-        std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>> lastAccessTimesByClass;
+        std::unordered_map<ClassId, std::vector<size_t>> firstAccessTimesByClass;
+        std::unordered_map<ClassId, std::vector<size_t>> lastAccessTimesByClass;
         std::unordered_map<ClassId, std::vector<size_t>> reuseTimeHistogramByClass;
         
         // Pre-allocate with exact sizes
@@ -584,26 +698,31 @@ private:
         // Reset counters for second pass
         std::unordered_map<ClassId, size_t> currentAccessIndex;
         
-        for (size_t i = 0; i < capturedBufferSize; ++i) {
-            size_t currentCircularIndex = (startIndex + i) % capturedMaxLen;
+        // Forward pass: collect first access times, last access times, and reuse times using counting sort approach on snapshot
+        std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>> keyToFirstAccess;
+        std::unordered_map<ClassId, std::unordered_map<KeyInt, size_t>> keyToLastAccess;
+        
+        for (size_t i = 0; i < snapshotSize; ++i) {
+            size_t currentCircularIndex = (startIndex + i) % snapshotMaxLen;
             
             // Defensive bounds check
-            if (currentCircularIndex >= capturedMaxLen || currentCircularIndex >= circularBuffer.size()) {
+            if (currentCircularIndex >= snapshotMaxLen || currentCircularIndex >= bufferSnapshot.size()) {
                 break;
             }
             
-            auto entry = circularBuffer[currentCircularIndex];
+            auto entry = bufferSnapshot[currentCircularIndex];
             const KeyInt& keyInt = std::get<0>(entry);
             const ClassId& classId = std::get<1>(entry);
             
             size_t local_idx_for_current_access = currentAccessIndex[classId]++;
 
-            // Process first access
-            auto& firstAccessForClass = firstAccessTimesByClass[classId];
-            auto& lastAccessForClass = lastAccessTimesByClass[classId];
+            // Process first access and last access
+            auto& firstAccessForClass = keyToFirstAccess[classId];
+            auto& lastAccessForClass = keyToLastAccess[classId];
             auto& reuseHistogramForClass = reuseTimeHistogramByClass[classId];
             
             auto [firstIt, firstInserted] = firstAccessForClass.emplace(keyInt, local_idx_for_current_access);
+            // First access is recorded when we first see the key
 
             // Process last access and reuse time calculation
             auto [lastIt, lastInserted] = lastAccessForClass.emplace(keyInt, local_idx_for_current_access);
@@ -620,6 +739,52 @@ private:
             }
         }
         
+        // Build sorted access time vectors using counting sort approach (O(n) for each class)
+        for (const auto& [classId, n] : nByClass) {
+            auto& firstAccessVectorForClass = firstAccessTimesByClass[classId];
+            auto& lastAccessVectorForClass = lastAccessTimesByClass[classId];
+            const auto& keyToFirstForClass = keyToFirstAccess[classId];
+            const auto& keyToLastForClass = keyToLastAccess[classId];
+            
+            // Create counting arrays for first and last access times
+            std::vector<size_t> firstAccessCount(n + 2, 0);  // +2 to handle 1-indexed safely
+            std::vector<size_t> lastAccessCount(n + 2, 0);   // +2 to handle n+1-x safely
+            
+            // Count first access times (1-indexed for fp formula)
+            for (const auto& [keyInt, firstAccessTime] : keyToFirstForClass) {
+                size_t firstAccess1Indexed = firstAccessTime + 1; // +1 for fp formula
+                if (firstAccess1Indexed <= n + 1) {
+                    firstAccessCount[firstAccess1Indexed]++;
+                }
+            }
+            
+            // Count last access times (reverse: n + 1 - lastAccessTime)
+            for (const auto& [keyInt, lastAccessTime] : keyToLastForClass) {
+                size_t reverseLastAccess = n - lastAccessTime; // n - accessTime as needed by calculateFpValues
+                if (reverseLastAccess <= n) {
+                    lastAccessCount[reverseLastAccess]++;
+                }
+            }
+            
+            // Build sorted vectors from counting arrays
+            firstAccessVectorForClass.reserve(keyToFirstForClass.size());
+            lastAccessVectorForClass.reserve(keyToLastForClass.size());
+            
+            // Generate sorted first access times
+            for (size_t accessTime = 1; accessTime <= n + 1; ++accessTime) {
+                for (size_t count = 0; count < firstAccessCount[accessTime]; ++count) {
+                    firstAccessVectorForClass.push_back(accessTime);
+                }
+            }
+            
+            // Generate sorted last access times (reverse order)
+            for (size_t reverseTime = 0; reverseTime <= n; ++reverseTime) {
+                for (size_t count = 0; count < lastAccessCount[reverseTime]; ++count) {
+                    lastAccessVectorForClass.push_back(reverseTime);
+                }
+            }
+        }
+        
         return std::make_tuple(std::move(firstAccessTimesByClass), std::move(lastAccessTimesByClass),
                                std::move(reuseTimeHistogramByClass), std::move(nByClass), std::move(mByClass));
     }
@@ -627,10 +792,10 @@ private:
     /**
      * @brief Calculates the footprint fp(w) for all possible window lengths 'w'
      * from 0 up to the total number of accesses 'n' for a given class in the current window.
-     * This version takes the window-specific statistics for a single class as arguments.
+     * This version takes pre-sorted vectors for better performance.
      *
-     * @param firstAccessTimesWindowForClass Unordered map of first access times for KeyInt.
-     * @param lastAccessTimesWindowForClass Unordered map of last access times for KeyInt.
+     * @param sortedFirstAccessTimesForClass Pre-sorted vector of first access times (1-indexed for fp formula).
+     * @param sortedLastAccessTimesForClass Pre-sorted vector of last access times (transformed: n - accessTime).
      * @param reuseTimeHistogramWindowForClass Vector of reuse time counts where index is reuse time.
      * @param nWindowForClass Total accesses in the current window for this class.
      * @param mWindowForClass Unique accesses in the current window for this class.
@@ -638,8 +803,8 @@ private:
      * Returns an empty vector if nWindowForClass is 0.
      */
     std::vector<double> calculateFpValues(
-        const std::unordered_map<KeyInt, size_t>& firstAccessTimesWindowForClass,
-        const std::unordered_map<KeyInt, size_t>& lastAccessTimesWindowForClass,
+        const std::vector<size_t>& sortedFirstAccessTimesForClass,
+        const std::vector<size_t>& sortedLastAccessTimesForClass,
         const std::vector<size_t>& reuseTimeHistogramWindowForClass,
         size_t nWindowForClass,
         size_t mWindowForClass) const {
@@ -675,26 +840,13 @@ private:
             sumRSuffix[t] += sumRSuffix[t+1];
         }
 
-        // Pre-allocate access time vectors with better sizing
-        const size_t fSize = firstAccessTimesWindowForClass.size();
-        const size_t lSize = lastAccessTimesWindowForClass.size();
+        // Pre-allocate access time vectors - they're already sorted!
+        const size_t fSize = sortedFirstAccessTimesForClass.size();
+        const size_t lSize = sortedLastAccessTimesForClass.size();
         
-        std::vector<size_t> fValues1Indexed;
-        std::vector<size_t> lValues1Indexed;
-        fValues1Indexed.reserve(fSize);
-        lValues1Indexed.reserve(lSize);
-        
-        // Build vectors more efficiently
-        for (const auto& [keyInt, accessTime] : firstAccessTimesWindowForClass) {
-            fValues1Indexed.push_back(accessTime + 1);
-        }
-        for (const auto& [keyInt, accessTime] : lastAccessTimesWindowForClass) {
-            lValues1Indexed.push_back(n - accessTime);
-        }
-
-        // Sort once for pointer-based iteration
-        std::sort(fValues1Indexed.begin(), fValues1Indexed.end());
-        std::sort(lValues1Indexed.begin(), lValues1Indexed.end());
+        // No need to build or sort vectors - they're already provided sorted!
+        const std::vector<size_t>& fValues1Indexed = sortedFirstAccessTimesForClass;
+        const std::vector<size_t>& lValues1Indexed = sortedLastAccessTimesForClass;
 
         // Pre-compute total sums
         double currentFSum = std::accumulate(fValues1Indexed.begin(), fValues1Indexed.end(), 0.0);
